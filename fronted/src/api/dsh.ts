@@ -159,3 +159,109 @@ export function eventToLog(entry: HistoryEntry): DriverLogLine[] {
   }
   return []
 }
+
+// ---- specStore 域（Remote 端点，/api/{namespace}/{method} 斜杠 + {args:{request}} 包装）----
+
+export type SpecKind = 'requirements' | 'services' | 'implementation' | 'review'
+export type SpecStatus = 'submitted' | 'approved' | 'rejected'
+export type SpecSectionStatus = 'complete' | 'partial' | 'missing'
+export type SpecCheckType = 'blocking' | 'risk' | 'suggestion'
+export type SpecDecisionAction = 'approved' | 'rejected' | 'revised'
+
+export interface SpecSection {
+  id: string
+  title: string
+  status: SpecSectionStatus
+  content: string[]
+}
+export interface SpecCheck {
+  type: SpecCheckType
+  title: string
+  desc: string
+  action: string
+}
+export interface SpecPending {
+  q: string
+  from: string
+  who: string
+}
+export interface SpecDecision {
+  action: SpecDecisionAction
+  who?: string
+  comment?: string
+  at: number
+}
+/** specStore 持久化的规格文档（版本 CAS + 决策日志）。 */
+export interface SpecRecord {
+  id: string
+  kind: SpecKind
+  projectId?: string
+  title: string
+  version: number
+  status: SpecStatus
+  sections: SpecSection[]
+  checks: SpecCheck[]
+  pendings: SpecPending[]
+  decisions: SpecDecision[]
+  createdAt: number
+  updatedAt: number
+}
+
+/** specStore 业务结果：与 carrier 层 result 同构，再包一层 ok/value|error。 */
+export type SpecResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: { code: string; specId?: string; current?: number | null } }
+
+/** Remote 端点的 payload 固定包装：`{ args: { request } }`。 */
+function remoteArgs(request: unknown): { args: { request: unknown } } {
+  return { args: { request } }
+}
+
+/** 调一个 specStore 方法，解开双层 ok 并抛业务错误。 */
+async function specCall<T>(method: string, request: unknown): Promise<T> {
+  const result = await rpc<SpecResult<T>>(method, remoteArgs(request))
+  if (!result.ok) {
+    const e = result.error
+    throw new Error(`specStore/${method.split('/')[1]} 失败：${e.code}${e.specId ? ` ${e.specId}` : ''}`)
+  }
+  return result.value
+}
+
+/** 列出规格（可选按项目过滤）。 */
+export async function listSpecs(projectId?: string): Promise<SpecRecord[]> {
+  const value = await specCall<{ specs: SpecRecord[] }>('specStore/list', { projectId })
+  return value.specs
+}
+
+/** 读一个规格。 */
+export function getSpec(specId: string): Promise<SpecRecord> {
+  return specCall<SpecRecord>('specStore/get', { specId })
+}
+
+/** 规格写入请求体。 */
+export interface SpecPutRequest {
+  specId: string
+  kind: SpecKind
+  title: string
+  projectId?: string
+  sections?: SpecSection[]
+  checks?: SpecCheck[]
+  pendings?: SpecPending[]
+  ifVersion: number
+}
+
+/** 新建或覆盖一个规格（ifVersion 0 新建，否则须匹配当前版本）。 */
+export function putSpec(request: SpecPutRequest): Promise<SpecRecord> {
+  return specCall<SpecRecord>('specStore/put', request)
+}
+
+/** 人工门禁决策（append-only，版本 CAS）。 */
+export function decideSpec(request: {
+  specId: string
+  action: SpecDecisionAction
+  who?: string
+  comment?: string
+  ifVersion: number
+}): Promise<SpecRecord> {
+  return specCall<SpecRecord>('specStore/decide', request)
+}

@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { specDataMap } from '@/mock/specs'
+import { specDataMap, type SpecData } from '@/mock/specs'
+import { getSpec } from '@/api/dsh'
+import { recordToSpecData } from '@/api/spec'
 import { Pill, Bar, AIPill, statusTone } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -16,8 +18,22 @@ const methodColor: Record<string, string> = { GET: 'text-emerald-600 bg-emerald-
 export default function SpecDetail() {
   const nav = useNavigate()
   const { id = 'req' } = useParams()
-  const spec = specDataMap[id] ?? specDataMap.req
-  const [sec, setSec] = useState(spec.sections[0].id)
+  const [spec, setSpec] = useState<SpecData>(() => specDataMap[id] ?? specDataMap.req)
+  const [sec, setSec] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getSpec(id)
+      .then(r => {
+        if (cancelled) return
+        const d = recordToSpecData(r)
+        setSpec(d)
+        setSec(d.sections[0]?.id ?? null)
+      })
+      .catch(() => { /* 后端不可达，保持 mock 详情 */ })
+    return () => { cancelled = true }
+  }, [id])
+
   const current = spec.sections.find(s => s.id === sec) ?? spec.sections[0]
   const completeness = Math.round(spec.sections.filter(s => s.status === '完整').length / spec.sections.length * 100)
   const notStarted = spec.status === '未开始'
