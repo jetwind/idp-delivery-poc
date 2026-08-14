@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { services as baseServices, pipelines, envDeploys, type ServiceAsset } from '@/mock/data'
 import LinkService from '@/components/LinkService'
+import { getSpec, putSpec } from '@/api/dsh'
+import { sectionToService, serviceToSection } from '@/api/spec'
 import { toast } from 'sonner'
 import { PageHeader, Pill, T, thCls, tdCls, statusTone } from '@/components/common'
 import { Button } from '@/components/ui/button'
@@ -13,12 +15,40 @@ const roleTone: Record<string, any> = { 新建: 'violet', 核心改造: 'amber',
 export default function ProjectAssets() {
   const [svcList, setSvcList] = useState<ServiceAsset[]>(baseServices)
   const [linkOpen, setLinkOpen] = useState(false)
+  const servicesVersionRef = useRef(0)
+
+  useEffect(() => {
+    let cancelled = false
+    getSpec('services')
+      .then(record => {
+        if (cancelled) return
+        setSvcList(record.sections.map(sectionToService))
+        servicesVersionRef.current = record.version
+      })
+      .catch(() => { /* services 规格不存在或后端不可达，保持 mock */ })
+    return () => { cancelled = true }
+  }, [])
+
+  const persistServices = async (next: ServiceAsset[]) => {
+    try {
+      const record = await putSpec({
+        specId: 'services', kind: 'services', title: '服务关联', projectId: 'p1',
+        sections: next.map(serviceToSection), ifVersion: servicesVersionRef.current,
+      })
+      servicesVersionRef.current = record.version
+    } catch { /* CAS 冲突或后端不可达，保持本地状态 */ }
+  }
+
   const onLinked = (svc: ServiceAsset) => {
-    setSvcList(l => l.some(x => x.name === svc.name) ? l : [...l, svc])
+    const next = svcList.some(x => x.name === svc.name) ? svcList : [...svcList, svc]
+    setSvcList(next)
+    void persistServices(next)
     toast.success(`已关联 ${svc.name}`, { description: `项目作用：${svc.role}${svc.branch !== '—' ? ' · 已创建项目分支' : ''}` })
   }
   const unlink = (name: string) => {
-    setSvcList(l => l.filter(x => x.name !== name))
+    const next = svcList.filter(x => x.name !== name)
+    setSvcList(next)
+    void persistServices(next)
     toast.success(`已解除关联 ${name}`, { description: '服务本身与平台数据不受影响' })
   }
   return (

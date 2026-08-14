@@ -10,8 +10,9 @@
 
 import type { Spec, SpecStatus } from '@/mock/data2'
 import type { SpecData } from '@/mock/specs'
+import type { ServiceAsset } from '@/mock/data'
 import type {
-  SpecCheckType, SpecDecisionAction, SpecRecord, SpecSectionStatus, SpecStatus as RSpecStatus,
+  SpecCheckType, SpecDecisionAction, SpecRecord, SpecSection, SpecSectionStatus, SpecStatus as RSpecStatus,
 } from './dsh'
 
 export const specStatusLabel: Record<RSpecStatus, SpecStatus> = {
@@ -95,5 +96,33 @@ export function recordToSpecData(record: SpecRecord): SpecData {
       type: checkTypeLabel[c.type], title: c.title, desc: c.desc, action: c.action,
     })),
     pendings: record.pendings.map(p => ({ q: p.q, from: p.from, who: p.who })),
+  }
+}
+
+// ---- 服务关联（services 规格）的 section 映射 ----
+// services 规格（kind=services）用每个 section 表示一个已关联服务：
+//   id = 服务名，title = 中文名，content 顺序约定 [role, version, owner, repo, branch]。
+
+/** ServiceAsset → services 规格的一个 section。 */
+export function serviceToSection(svc: ServiceAsset): SpecSection {
+  return {
+    id: svc.name,
+    title: svc.cnName,
+    status: 'complete',
+    content: [svc.role, svc.version, svc.owner, svc.repo, svc.branch],
+  }
+}
+
+/** services 规格的一个 section → ServiceAsset。 */
+export function sectionToService(section: SpecSection): ServiceAsset {
+  const [role = '直接复用', version = '—', owner = '—', repo = '—', branch = '—'] = section.content
+  return {
+    name: section.id,
+    cnName: section.title,
+    role: (['新建', '核心改造', '接口适配', '直接复用'] as const).includes(role as never) ? role as ServiceAsset['role'] : '直接复用',
+    version,
+    owner,
+    repo,
+    branch,
   }
 }
