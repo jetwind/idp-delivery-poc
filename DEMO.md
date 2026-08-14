@@ -20,10 +20,33 @@
 - Python 3.10+（编排服务）
 - `DEEPSEEK_API_KEY`（真实 LLM 调用，harness 用它跑 agent）
 
+## 跨平台说明
+
+准备/回滚脚本有两个版本，按系统选：
+
+| 系统 | 准备脚本 | 回滚脚本 |
+|---|---|---|
+| **macOS / Linux** | `bash harness-setup.sh` | `bash harness-reset.sh` |
+| **Windows** | `powershell -ExecutionPolicy Bypass -File harness-setup.ps1` | `powershell -ExecutionPolicy Bypass -File harness-reset.ps1` |
+
+其余启动命令跨平台一致（`pnpm` / `npm` / `python`，Mac 若 `python` 不存在用 `python3`）。
+
+**工作目录（cwd）** 在页面的输入框里填你本机仓库的实际路径：
+
+- macOS/Linux：`/Users/<你>/deepseek-harness-delivery/examples/project-delivery`
+- Windows：`D:/.../deepseek-harness-delivery/examples/project-delivery`
+
 ## 步骤 1：准备 harness（一次性，临时改动）
 
 harness 需要临时挂上 spec 插件 + 阶段 preset（学习用，之后可回滚）。跑一键脚本：
 
+**macOS / Linux：**
+```bash
+cd deepseek-harness-delivery
+bash harness-setup.sh
+```
+
+**Windows：**
 ```powershell
 cd deepseek-harness-delivery
 powershell -ExecutionPolicy Bypass -File harness-setup.ps1

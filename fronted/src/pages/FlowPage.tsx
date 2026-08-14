@@ -13,7 +13,7 @@ const STAGES = [
   { id: 'testing', name: '测试验证' },
 ]
 
-const DEFAULT_CWD = 'D:/ccn-work/src/github/deepseek-harness-delivery/examples/project-delivery'
+const DEFAULT_CWD = ''
 
 export default function FlowPage() {
   const [requirement, setRequirement] = useState('')
@@ -48,7 +48,7 @@ export default function FlowPage() {
   }, [threadId, stopPolling])
 
   async function handleStart() {
-    if (!requirement.trim()) return
+    if (!requirement.trim() || !cwd.trim()) return
     setBusy(true); setError(null); setSnapshot(null)
     try {
       const snap = await startFlow(requirement.trim(), cwd.trim())
@@ -150,9 +150,9 @@ export default function FlowPage() {
               value={cwd}
               onChange={e => setCwd(e.target.value)}
               className="flex-1 h-8 rounded-md border border-slate-200 px-2 text-xs font-mono text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="工作目录（agent 干活的地方）"
+              placeholder="工作目录，如 <仓库路径>/examples/project-delivery（agent 干活的地方）"
             />
-            <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" disabled={busy || !requirement.trim()} onClick={handleStart}>
+            <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" disabled={busy || !requirement.trim() || !cwd.trim()} onClick={handleStart}>
               {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}
               启动流水线
             </Button>
