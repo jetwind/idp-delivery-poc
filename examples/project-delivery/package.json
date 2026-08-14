@@ -1,0 +1,7 @@
+{
+  "name": "project-delivery-example",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Runnable demo: project-centric, full-lifecycle agent delivery through staged agent presets"
+}

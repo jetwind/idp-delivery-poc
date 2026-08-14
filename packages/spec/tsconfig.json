@@ -1,0 +1,30 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/client.ts"
+  ],
+  "references": [
+    {
+      "path": "../../../deepseek-harness/vendor/cordis"
+    },
+    {
+      "path": "../../../deepseek-harness/packages/util/brand"
+    },
+    {
+      "path": "../../../deepseek-harness/packages/storage/storage-domain"
+    },
+    {
+      "path": "../../../deepseek-harness/packages/typert/protocol"
+    },
+    {
+      "path": "../../../deepseek-harness/packages/runtime-diagnostics/invariants"
+    }
+  ]
+}

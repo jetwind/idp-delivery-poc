@@ -1,0 +1,30 @@
+# 项目交付 bundle：为 dsh 宿主补充「服务层」——持久化规格存储 + 阶段预设名录。
+#
+# 阶段预设（agent plane）由本 bundle 的 presets/ 目录提供，通过 dsh 的用户预设根
+# （$DSH_HOME/.agent-presets）自动发现（见顶层 README「接入」）；模型侧 spec 工具
+# 在 presets 各自的 agent.cordis.yml 里挂载，宿主只保留服务与注册表。
+
+- insert:
+    # 持久化存储栈（headless 宿主没有；web 宿主已自带，若重复会冲突——见 README）
+    - id: storage
+      name: '@deepseek-ai/dsh-storage'
+
+    - id: storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('storages')
+
+    - id: storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+
+    # 规格存储（数据面）：版本化、可留痕、带人工门禁决策日志
+    - id: spec-store
+      name: '@deepseek-ai/dsh-spec'
+
+    # 阶段预设名录：默认从需求阶段开始
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: requirements

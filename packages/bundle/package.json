@@ -1,0 +1,46 @@
+{
+  "name": "@deepseek-ai/dsh-project-delivery",
+  "version": "0.1.0",
+  "description": "Out-of-tree project-delivery bundle for DeepSeek Harness: durable spec store plus staged agent presets (requirements → link-services → coding → review, and later phases)",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "presets/**/*"
+  ],
+  "dependencies": {
+    "@deepseek-ai/dsh-spec": "workspace:*",
+    "@deepseek-ai/dsh-tool-spec": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-agent-presets": "*",
+    "@deepseek-ai/dsh-invariants": "*",
+    "@deepseek-ai/dsh-storage": "*",
+    "@deepseek-ai/dsh-storage-domain": "*",
+    "@deepseek-ai/dsh-storage-json": "*",
+    "@deepseek-ai/cordis": "*"
+  }
+}

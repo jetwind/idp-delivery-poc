@@ -1,0 +1,6 @@
+# Add the project-delivery spec store to the shipped Web Host. The host already
+# mounts the storage hub/JSON backend/domain form (web-app bundle), so only the
+# spec service is inserted; the typert loader auto-registers its Remote contract.
+- insert:
+    - id: spec-store
+      name: '@deepseek-ai/dsh-spec'

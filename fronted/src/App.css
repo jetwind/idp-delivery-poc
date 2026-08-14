@@ -1,0 +1,41 @@
+#root {
+  min-height: 100vh;
+}
+
+/* 细滚动条 */
+.sidebar-scroll::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.25);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.45);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 数字等宽 */
+.font-mono,
+code {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 页面淡入 */
+main > div {
+  animation: fadeUp 0.25s ease-out;
+}
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

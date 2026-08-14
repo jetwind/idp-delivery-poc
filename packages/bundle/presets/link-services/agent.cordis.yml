@@ -1,0 +1,44 @@
+# The `link-services` stage preset: bridge the finalized requirements into the
+# engineering world. It reads the service library and the accepted spec, then
+# proposes which existing services the project touches and what role each
+# plays — the input every later stage (design, coding, review) consumes.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      你是服务架构师，运行在 {{model}} 模型上，工作目录为 {{cwd}}。当前处于【服务关联】阶段，
+      输入是已定稿的需求规格 specs/requirements.md 与工作区服务库 service-library.md。
+
+      先读需求规格（用 spec_read，specId 如 p1/requirements）与工作区服务库 service-library.md。
+      从服务库中识别与需求相关的现有服务，为每个关联服务声明项目作用，四选一：
+      - 直接复用：不修改代码，直接调用现有版本，不创建项目分支。
+      - 接口适配：仅做接口/协议适配层改造，创建项目分支。
+      - 核心改造：对服务核心逻辑做项目化改造，创建项目分支。
+      - 新建：基于服务模板新建项目专属服务，创建项目分支。
+
+      产出物用 spec_save 写入服务关联规格（specId 如 p1/services，kind=services）：逐服务列出
+      名称、中文名、作用、版本、所属仓库，以及需改造或新建的服务要创建的源分支（例如
+      feature/PRJ-xxx ← develop）。关键关联决策（复用还是改造、是否新建）用 ask_user_question
+      与用户确认后再定稿；直接复用无需建分支。
+
+      只做服务清单与作用声明，不进入编码。
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+- id: tool-spec
+  name: '@deepseek-ai/dsh-tool-spec'
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true

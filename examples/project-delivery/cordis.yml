@@ -1,0 +1,152 @@
+# Project-centric, lifecycle-staged agent composition. One process hosts one
+# shared spine; a session composes its world by mounting exactly one stage
+# preset (requirements/design/coding/testing/release/retrospective) at
+# creation, so every project stage gets a different tool set and persona while
+# registries, persistence, and the LLM route stay process-global.
+
+# User-settings document (`$DSH_HOME/settings.yaml`, hot-reloaded): a
+# `llm-deepseek:` section there overrides the adapter entry below without a
+# restart.
+- id: settings
+  name: '@deepseek-ai/dsh-settings-file'
+
+# Credential store: the live process environment over `$DSH_HOME/.credentials.yaml`
+# (owner-only file, hot-reloaded). The adapter resolves `DEEPSEEK_API_KEY`
+# through it at each request, so no key is inlined in this file.
+- id: credentials
+  name: '@deepseek-ai/dsh-credentials-local'
+
+# The DeepSeek adapter. Swap to '@deepseek-ai/dsh-llm-pi-ai' for the pi-ai-backed
+# twin, or disable this row and register any other adapter for a custom model
+# gateway. Shipped default: full thinking at max effort on every request.
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    thinking: enabled
+    reasoningEffort: max
+    models:
+      - id: deepseek-v4-pro
+        contextWindow: 128000
+      - id: deepseek-v4-flash
+        contextWindow: 128000
+
+# Managed child-process groups shared by every shell executor below.
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+
+# One shell executor per host platform: bash has no Windows runner, so the
+# gating mirrors `dsh-base` — exactly one executor family is live per process.
+- id: bash
+  name: '@deepseek-ai/dsh-bash-local'
+  disabled: !!js process.platform === 'win32'
+
+- id: pwsh
+  name: '@deepseek-ai/dsh-pwsh-local'
+  disabled: !!js process.platform !== 'win32'
+
+# The stage roster: discovery scans only this example's preset directory, so
+# the machine's real `$DSH_HOME/.agent-presets` never leaks into the demo.
+# `default` names the preset a session mounts when a caller names none —
+# requirements is the delivery entry point.
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: requirements
+    includeUserRoot: false
+    roots:
+      - path: ./presets
+        trust: system
+
+# The shared agent spine (no declarative agents): the demo driver creates one
+# agent per stage with a `setup` hook that mounts the stage preset, exactly as
+# a project-delivery web client would. The spine keeps its own global bash
+# consumer (its `shellEnv` contribution is coupled to it); the stage presets
+# contribute the platform-correct model-facing shell tools.
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents: []
+    workspaceContext:
+      maxBytes: 65536
+    persona: |
+      You are a project-delivery agent. Each project stage is a fresh session
+      composed by one stage preset; stay inside the stage's scope and hand
+      off at the stage boundary.
+
+# Human question/answer seam: `tool-ask-user` pauses a tool call on the
+# provider-neutral `ask()` promise. No front-end provider is mounted here, so
+# a keyless turn never blocks on a question.
+- id: user-questions
+  name: '@deepseek-ai/dsh-user-questions'
+
+# Per-stage sessions persist to their own JSONL log under the invoking
+# directory; the fixture overlay re-points this to an isolated temp root.
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+
+- id: checkpoint-policy
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'
+
+# Summarize an older range when derived history approaches the context window.
+- id: token-meter
+  name: '@deepseek-ai/dsh-token-meter'
+
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  config:
+    thresholdRatio: 0.8
+    retainRatio: 0.16
+    maxTokens: 8192
+    compactionRetries: 1
+
+# Projection registry: durable subagent identity (mode/label) folds through
+# its registered units; subagent catalog reads fail loud without the capability.
+- id: session-projection
+  name: '@deepseek-ai/dsh-session-projection'
+
+# Host-plane subagent providers. The stage presets contribute the delegation
+# tools that consume them; `subagent-spawn-in-process` also backs the
+# worker-thread workflow engine the coding stage mounts.
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: subagent-spawn-in-process
+  name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+  config:
+    providerName: spawn
+
+- id: subagent-fork-in-process
+  name: '@deepseek-ai/dsh-subagent-fork-in-process'
+  config:
+    providerName: fork
+
+# Host-plane filesystem service and observation policy; the stage presets
+# register the model-facing read/write tools into their own scope layers.
+- id: fs-local
+  name: '@deepseek-ai/dsh-fs-local'
+  config:
+    cwd: !!js process.cwd()
+
+- id: fs-observation-policy
+  name: '@deepseek-ai/dsh-fs-observation-policy'
+
+# Durable spec store (direction 2): the structured, versioned, decision-audited
+# replacement for `specs/*.md` files. The Web GUI reads/writes it through the
+# generated Remote contract; the stage presets hand specs off through it.
+- id: storage
+  name: '@deepseek-ai/dsh-storage'
+
+- id: storage-json
+  name: '@deepseek-ai/dsh-storage-json'
+  config:
+    root: './.storages'
+
+- id: storage-domain
+  name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+
+- id: spec-store
+  name: '@deepseek-ai/dsh-spec'

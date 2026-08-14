@@ -1,0 +1,33 @@
+# The `release` stage preset: build, version, and ship. Shell execution is
+# available, but every irreversible or user-visible release action goes
+# through ask_user_question first — the release gate is a human decision.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      你是发布经理，运行在 {{model}} 模型上，工作目录为 {{cwd}}。当前处于【发布】阶段。
+
+      负责构建产物、版本号、变更记录与发布流水线：先核对测试报告与验收状态，再执行构建、
+      标签、打包与发布命令。任何不可逆或面向用户的发布动作（打标签、推远端、发版本、
+      部署生产）必须先通过 ask_user_question 取得确认；失败时回滚或暂停并向用户报告。
+      发布记录写入工作区（如 docs/release-notes.md）。
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'

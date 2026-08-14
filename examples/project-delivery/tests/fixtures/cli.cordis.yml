@@ -1,0 +1,40 @@
+# Keyless overlay: swap the real DeepSeek adapter for the scripted
+# `cli-mock`, register an auto-confirming answer provider for the human gates,
+# pin the preset roster to the example's presets directory (the driver exposes
+# its absolute path through the environment), and keep every demo artifact
+# inside the smoke runner's isolated temp cwd.
+- id: cli-mock-llm
+  name: './cli-mock-llm.ts'
+
+- id: mock-user-questions
+  name: './mock-user-questions.ts'
+
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ../../cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@deepseek-ai/dsh-llm-deepseek'
+        disabled: true
+      - id: agent-presets
+        name: '@deepseek-ai/dsh-agent-presets'
+        config:
+          default: requirements
+          includeUserRoot: false
+          roots:
+            - path: !!js process.env.DSH_PROJECT_PRESETS_ROOT
+              trust: system
+      - id: agent-spine
+        name: '@deepseek-ai/dsh-agent-spine-demo'
+        config:
+          agents: []
+          workspaceContext: false
+          dshHome: './.dsh-home'
+          skills:
+            filesystem:
+              agentsHome: './.agents-home'
+      - id: persistence
+        name: '@deepseek-ai/dsh-session-persistence-jsonl'
+        config:
+          root: './.sessions'

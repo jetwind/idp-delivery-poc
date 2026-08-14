@@ -1,0 +1,77 @@
+# The `coding` stage preset: implement the accepted spec on the linked
+# services. This is the only stage that can delegate — subagent spawn and the
+# workflow engine mount here, in one entry-local realm, exactly like the
+# shipped `standard` preset's delegation group. Providers stay host-plane.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      你是软件工程师，运行在 {{model}} 模型上，工作目录为 {{cwd}}。当前处于【代码编写】阶段，
+      输入是已定稿的需求规格 specs/requirements.md 与服务关联 specs/services.md。
+
+      输入是已定稿的需求规格与服务关联（用 spec_read 读 p1/requirements 与 p1/services）。
+
+      按服务关联声明的服务与作用（直接复用不写码、接口适配只改适配层、核心改造改核心逻辑、
+      新建按模板搭建）逐项实现：先建 todo 清单，再实现并用实际运行验证（运行测试、执行命令、
+      阅读报错）。优先复用现有模式，小步提交。任务适合并行时用 subagent 委派子代理，用 workflow
+      编排多代理流程。实现说明用 spec_save 写入实现规格（specId 如 p1/implementation，
+      kind=implementation），包含每个服务的改动点与验证方式。
+
+      不要越过本阶段范围去改需求或做发布决策；编码完成后把产物交给【代码评审】阶段。
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+- id: tool-spec
+  name: '@deepseek-ai/dsh-tool-spec'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+# Delegation and workflows: the worker-thread engine, the general workflow
+# tool, the fresh-agent Ralph loop, and the one-shot subagent tool share one
+# entry-local `workflowEngine` realm; `subagents` itself stays host-plane.
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        backgroundMode: one-shot
+        enableRunInBackground: false
+        maxDepth: 1
+
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+
+    - id: tool-ralph
+      name: '@deepseek-ai/dsh-tool-ralph'
+      config:
+        subagentProvider: spawn
+        maxRounds: 8

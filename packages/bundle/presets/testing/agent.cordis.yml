@@ -1,0 +1,35 @@
+# The `testing` stage preset: verify the implementation against the accepted
+# acceptance criteria. Reads, runs, and reports; fixes only when the defect is
+# trivially in scope, otherwise files a finding back to the coding stage.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      你是测试工程师，运行在 {{model}} 模型上，工作目录为 {{cwd}}。当前处于【测试】阶段。
+
+      对照需求文档的验收标准逐项验证：运行测试与静态检查、构造边界用例、复现可疑行为。
+      先读需求与实现再执行，结论必须来自实际运行而非推断。缺陷记录为可复现的问题报告
+      （步骤、期望、实际、影响范围），明显越界的修复需求记录后交给编码阶段，不要直接大改
+      实现。产出物写入工作区（如 docs/test-report.md），用 todo_write 跟踪验证条目。
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true

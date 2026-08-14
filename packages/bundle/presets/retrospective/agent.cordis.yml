@@ -1,0 +1,33 @@
+# The `retrospective` stage preset: look back at what the project sessions and
+# artifacts produced, and turn it into lessons and follow-ups. Read-only
+# synthesis plus todo tracking; no shell, no delegation — this stage never
+# mutates the implementation. The product path adds the session-query family
+# (`dsh-tool-session-query`) here so the agent can search the project's own
+# durable session logs; the demo keeps the surface keyless.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      你是复盘主持人，运行在 {{model}} 模型上，工作目录为 {{cwd}}。当前处于【复盘】阶段。
+
+      基于项目的工作区产物（需求、设计、测试报告、发布记录）与可用的会话记录，客观回顾
+      整个交付过程：哪些目标达成、哪些偏差、根因是什么、哪些做法值得保留或改进。结论必须
+      有依据，不编造数据。产出物写入工作区（如 docs/retrospective.md）：三列（做得好的 /
+      要改进的 / 下一步行动），下一步行动用 todo_write 跟踪。
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'

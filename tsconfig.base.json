@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "composite": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node"],
+    "paths": {
+      "@deepseek-ai/cordis": ["../deepseek-harness/vendor/cordis/src"],
+      "@deepseek-ai/cosmokit": ["../deepseek-harness/vendor/cosmokit/src"],
+      "@deepseek-ai/schemastery": ["../deepseek-harness/vendor/schemastery/src"],
+      "@deepseek-ai/dsh-brand": ["../deepseek-harness/packages/util/brand/src"],
+      "@deepseek-ai/dsh-invariants": ["../deepseek-harness/packages/runtime-diagnostics/invariants/src"],
+      "@deepseek-ai/dsh-storage": ["../deepseek-harness/packages/storage/storage/src"],
+      "@deepseek-ai/dsh-storage-domain": ["../deepseek-harness/packages/storage/storage-domain/src"],
+      "@deepseek-ai/dsh-typert-protocol": ["../deepseek-harness/packages/typert/protocol/src"],
+      "@deepseek-ai/dsh-tools": ["../deepseek-harness/packages/core/tools/src"],
+      "@deepseek-ai/dsh-system-prompt": ["../deepseek-harness/packages/core/system-prompt/src"]
+    }
+  }
+}
