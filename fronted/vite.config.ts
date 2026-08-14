@@ -18,7 +18,9 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: DSH_BACKEND,
-        changeOrigin: true,
+        // 保持 Host 与浏览器 Origin 一致（都是 localhost:3000），否则 dsh 的
+        // Origin 围栏会把 changeOrigin 改过的 Host 判成跨站而返回 403。
+        changeOrigin: false,
       },
     },
   },

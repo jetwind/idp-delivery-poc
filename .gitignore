@@ -14,9 +14,18 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
 # 编辑器 / 系统
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 *.local
+
+#
+*.docx
