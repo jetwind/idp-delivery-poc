@@ -43,6 +43,7 @@ const navGroups = [
     title: 'AI 原生交付',
     items: [
       { to: `${P}/delivery`, label: '交付总览', icon: Gauge },
+      { to: `${P}/flow`, label: 'AI 流水线', icon: Workflow },
       { to: '/cockpit', label: 'AI 驾驶舱', icon: Radar },
       { to: `${P}/context`, label: '项目上下文', icon: Database },
       { to: `${P}/specs`, label: '项目规格', icon: FileStack },
@@ -193,7 +194,7 @@ function crumbMap(path: string): string {
     [/^\/cockpit/, 'AI 驾驶舱'], [/^\/agents/, '数字员工中心'], [/^\/knowledge/, '知识库管理'], [/^\/metrics/, '度量中心'],
     [/^\/projects$/, '项目与产品'], [/^\/projects\/new/, '创建项目'],
     [/^\/projects\/p1$/, '项目概览'], [/members/, '项目成员'], [/assets/, '工程资产'],
-    [/delivery/, '交付总览'], [/context/, '项目上下文'], [/specs\/req/, '规格详情 · 需求规格'], [/specs\/design/, '规格详情 · 设计规格'], [/specs\/api/, '规格详情 · 接口规格'], [/specs\/test/, '规格详情 · 测试验收规格'], [/specs\/release/, '规格详情 · 发布交付规格'],
+    [/delivery/, '交付总览'], [/flow/, 'AI 流水线'], [/context/, '项目上下文'], [/specs\/req/, '规格详情 · 需求规格'], [/specs\/design/, '规格详情 · 设计规格'], [/specs\/api/, '规格详情 · 接口规格'], [/specs\/test/, '规格详情 · 测试验收规格'], [/specs\/release/, '规格详情 · 发布交付规格'],
     [/specs/, '项目规格'], [/workflow/, '交付流程'], [/tasks\/.*\/complete/, '输入补全 · 测试用例生成'], [/tasks/, 'AI Task 详情'],
     [/gate/, 'Evaluation / Human Gate'], [/releases\/compare/, '版本对比'],
     [/releases\/v/, '版本详情'], [/releases/, '版本与基线'], [/outcomes/, '交付成果'], [/retro/, '复盘沉淀'],

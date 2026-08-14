@@ -14,6 +14,7 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langgraph.types import Command
 
@@ -21,6 +22,12 @@ from graph import STAGES, build_graph
 from harness_client import HarnessClient
 
 app = FastAPI(title="delivery-orchestrator")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 client = HarnessClient()
 graph = build_graph(client)
 
@@ -79,6 +86,11 @@ async def state(thread_id: str) -> dict[str, Any]:
 
 @app.post("/flow/resume/{thread_id}")
 async def resume(thread_id: str, req: ResumeRequest) -> dict[str, Any]:
+    """同步 resume：推进图到下一个 interrupt，返回该 interrupt 的快照。
+
+    会阻塞到下一个 gate/question（agent 跑几分钟），所以前端必须直连本服务
+    （带 CORS），不要走 Vite proxy（其长连接会被中间层断开）。
+    """
     try:
         await graph.ainvoke(Command(resume=req.answer), config=_config(thread_id))
     except Exception as exc:  # noqa: BLE001 - 把图错误透传给前端排查

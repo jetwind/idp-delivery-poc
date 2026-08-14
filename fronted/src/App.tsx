@@ -11,6 +11,7 @@ import ProjectContext from '@/pages/ProjectContext'
 import SpecList from '@/pages/SpecList'
 import SpecDetail from '@/pages/SpecDetail'
 import WorkflowPage from '@/pages/WorkflowPage'
+import FlowPage from '@/pages/FlowPage'
 import AITaskDetail from '@/pages/AITaskDetail'
 import CompletionPage from '@/pages/CompletionPage'
 import GatePage from '@/pages/GatePage'
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="/projects/p1/specs" element={<SpecList />} />
         <Route path="/projects/p1/specs/:id" element={<SpecDetail />} />
         <Route path="/projects/p1/workflow" element={<WorkflowPage />} />
+        <Route path="/projects/p1/flow" element={<FlowPage />} />
         <Route path="/projects/p1/tasks/:id" element={<AITaskDetail />} />
         <Route path="/projects/p1/tasks/:id/complete" element={<CompletionPage />} />
         <Route path="/projects/p1/gate" element={<GatePage />} />
