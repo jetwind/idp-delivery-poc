@@ -28,7 +28,16 @@ export interface GateInterrupt {
   spec_id: string | null
 }
 
-export type FlowPending = QuestionInterrupt | GateInterrupt
+export interface ApprovalInterrupt {
+  type: 'approval'
+  stage: string
+  session_id: string
+  rpc_id: string
+  toolName: string
+  reason?: string
+}
+
+export type FlowPending = QuestionInterrupt | GateInterrupt | ApprovalInterrupt
 
 export interface FlowSnapshot {
   thread_id: string
@@ -36,7 +45,8 @@ export interface FlowSnapshot {
   stage: string
   done: boolean
   pending: FlowPending | null
-  spec_cache: Record<string, unknown>
+  /** 每阶段产出的文件清单（阶段 id → 文件路径列表）。 */
+  artifacts: Record<string, string[]>
 }
 
 // 编排服务直连（带 CORS），不走 Vite proxy：/flow/start 和 /flow/resume 会

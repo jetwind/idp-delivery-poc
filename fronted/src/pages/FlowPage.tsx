@@ -94,6 +94,18 @@ export default function FlowPage() {
     }
   }
 
+  async function submitApproval(outcome: 'allowed-once' | 'rejected') {
+    setBusy(true); setError(null)
+    try {
+      const snap = await resumeFlow(threadId!, outcome)
+      setSnapshot(snap)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function reset() {
     stopPolling()
     setThreadId(null); setSnapshot(null); setError(null); setAnswers({}); setCustoms({})
@@ -209,6 +221,28 @@ export default function FlowPage() {
           )}
 
           {/* gate */}
+          {/* approval */}
+          {pending?.type === 'approval' && (
+            <div className="bg-white rounded-lg border border-rose-200/70 px-5 py-4">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldCheck className="w-4 h-4 text-rose-500" />
+                <span className="text-[13px] font-semibold text-slate-800">agent 请求执行命令（{pending.stage}）</span>
+              </div>
+              <div className="text-xs text-slate-600 mb-1">工具：<code className="font-mono">{pending.toolName}</code></div>
+              {pending.reason && <div className="text-xs text-slate-500 mb-3">{pending.reason}</div>}
+              <div className="flex gap-2">
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => submitApproval('allowed-once')}>
+                  {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
+                  批准一次
+                </Button>
+                <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50" disabled={busy} onClick={() => submitApproval('rejected')}>
+                  <XCircle className="w-3.5 h-3.5 mr-1" />拒绝
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* gate */}
           {pending?.type === 'gate' && (
             <div className="bg-white rounded-lg border border-violet-200/70 px-5 py-4">
               <div className="flex items-center gap-2 mb-3">
@@ -238,21 +272,23 @@ export default function FlowPage() {
           )}
 
           {/* 产物 */}
-          {Object.keys(snapshot.spec_cache).length > 0 && (
+          {Object.keys(snapshot.artifacts).length > 0 && (
             <div className="bg-white rounded-lg border border-slate-200/80 px-5 py-4">
               <div className="flex items-center gap-2 mb-3">
                 <FileText className="w-4 h-4 text-slate-500" />
-                <span className="text-[13px] font-semibold text-slate-800">已产出规格</span>
+                <span className="text-[13px] font-semibold text-slate-800">已产出文件</span>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(snapshot.spec_cache).map(([id, spec]) => {
-                  const s = spec as { title?: string; version?: number; status?: string }
-                  return (
-                    <Pill key={id} tone={s.status === 'approved' ? 'green' : 'amber'}>
-                      {id} · {s.title ?? ''} V{s.version ?? '?'}
-                    </Pill>
-                  )
-                })}
+              <div className="space-y-1.5">
+                {Object.entries(snapshot.artifacts).map(([stage, files]) => (
+                  <div key={stage} className="flex items-start gap-2">
+                    <Pill tone="green">{stage}</Pill>
+                    <div className="flex flex-wrap gap-1.5">
+                      {files.map(f => (
+                        <code key={f} className="text-xs font-mono text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{f}</code>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

@@ -47,19 +47,6 @@ class HarnessClient:
         }
         return await self._post(f"/api/{method}", body)
 
-    async def _remote(self, ns: str, method: str, request: dict[str, Any]) -> dict[str, Any]:
-        body = {
-            "type": "client-request",
-            "rpcId": self._rpc_id(),
-            "method": f"{ns}/{method}",
-            "payload": {"args": {"request": request}},
-        }
-        value = await self._post(f"/api/{ns}/{method}", body)
-        # Remote 端点业务结果是双层 ok。
-        if not value.get("ok"):
-            raise HarnessError(f"{ns}/{method} business failed: {value.get('error')}")
-        return value["value"]
-
     # ---- session（legacy）----
 
     async def create_session(self, cwd: str, agent_preset: str) -> dict[str, Any]:
@@ -90,18 +77,7 @@ class HarnessClient:
         value = await self._legacy("session.list", {})
         return value.get("items", [])
 
-    # ---- specStore（Remote）----
-
-    async def spec_get(self, spec_id: str) -> dict[str, Any]:
-        return await self._remote("specStore", "get", {"specId": spec_id})
-
-    async def spec_list(self, project_id: str | None = None) -> list[dict[str, Any]]:
-        request: dict[str, Any] = {}
-        if project_id is not None:
-            request["projectId"] = project_id
-        return await self._remote("specStore", "list", request)
-
-    # ---- question（WebSocket + /api/respond）----
+    # ---- question / approval（WebSocket + /api/respond）----
 
     async def respond_question(
         self, question_rpc_id: str, session_id: str, answers: list[dict[str, Any]],
@@ -115,6 +91,26 @@ class HarnessClient:
                 "value": {
                     "sessionId": session_id,
                     "answer": {"answers": answers},
+                },
+            },
+        }
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            resp = await client.post(f"{self.base_url}/api/respond", json=body)
+        return resp.json()
+
+    async def respond_approval(
+        self, approval_rpc_id: str, session_id: str, approval_id: str, outcome: str,
+    ) -> dict[str, Any]:
+        """回答一个 approval（危险操作权限审批）。outcome: allowed-once / rejected。"""
+        body = {
+            "type": "client-response",
+            "rpcId": approval_rpc_id,
+            "result": {
+                "ok": True,
+                "value": {
+                    "sessionId": session_id,
+                    "approvalId": approval_id,
+                    "outcome": outcome,
                 },
             },
         }

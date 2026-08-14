@@ -44,11 +44,14 @@ def main() -> None:
         elif pending["type"] == "gate":
             print(f"  [gate] 「{pending['stage']}」→ approve")
             snap = requests.post(f"{BASE}/flow/resume/{tid}", json={"answer": "approve"}, timeout=900).json()
+        elif pending["type"] == "approval":
+            print(f"  [approval] {pending.get('toolName')} → allowed-once")
+            snap = requests.post(f"{BASE}/flow/resume/{tid}", json={"answer": "allowed-once"}, timeout=900).json()
         else:
             print(f"  未知 pending: {pending}")
             break
 
-    print(f"final: stage_index={snap.get('stage_index')} done={snap.get('done')} spec_cache={list(snap.get('spec_cache', {}).keys())}")
+    print(f"final: stage_index={snap.get('stage_index')} done={snap.get('done')} artifacts={list(snap.get('artifacts', {}).keys())}")
 
 
 if __name__ == "__main__":
