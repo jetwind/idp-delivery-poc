@@ -1,0 +1,166 @@
+{
+  "businessDesign": "业务流程：关键路径一为批量生成（FR-1）——调用方 POST /api/v1/trace-codes/generate 携带 enterprisePrefix、productCode、productName、batchNo、productionDate、quantity，Controller 做参数与格式校验（失败返 400），成功则 TraceCodeService 调用 SerialAllocator 按[企业前缀+商品代码]原子分配 quantity 个唯一连续序列号（起始号 startSerial），循环构造码=企业前缀+商品代码+序列号，逐条写入 MemoryStore（ConcurrentHashMap），返回 N 个码。关键路径二为按码查询（FR-2）——GET /api/v1/trace-codes/{code}，Controller 校验非空且格式合法（非法返 400），TraceCodeService 从 MemoryStore 读码，命中返回产品名/批次/生产日期，未命中抛业务异常由 GlobalExceptionHandler 归一化为 404。异常路径：quantity 越界或非数字返 400；必填字段缺失返 400；追溯码格式非法或为空返 400；序列号溢出或内存写入冲突（理论不出现）兜底返 500；前端空输入由浏览器端拦截提示。\n\n领域模型：实体/聚合为 TraceCode（追溯码），值类型 code 字符串即聚合标识，结构=企业前缀+商品代码+序列号，无校验位无分隔符；ProductInfo 为聚合内产品信息值对象，字段 traceCode(主键)、productName、productCode、batchNo、productionDate(LocalDate)、serialNumber；序列号分配纳入域服务 SerialAllocator，状态为 ConcurrentHashMap<String, AtomicLong>，key=企业前缀+商品代码，value=当前已分配最大序列号。\n\n业务规则：R1 码结构=企业前缀+商品代码+序列号，序列为顺序号；R2 以[企业前缀+商品代码]为分配域，域内序列号严格递增全局唯一，跨域互不影响，用 AtomicLong.getAndAdd(quantity) 一次性预留实现并发安全；R3 数量约束 1<=quantity<=1000；R4 五个字段必填；R5 查询信息与生成时写入一致（只读无漂移）；R6 追溯码格式非法（非字母数字与-）返 400；R7 前端空输入阻止提交并提示。\n\n已确认的两项设计决策：一、前端仅做查询页面，批量生成作为 REST API 供调用方/开发者复用；二、产品名 productName 为独立生成入参字段，与 productCode 分离并入库，查询接口返回产品名。",
+  "architecture": "总体为单仓库前后端分离：后端为新建单体 Spring Boot 3.x（Java 21）应用，前端为 Vue 3+TypeScript+Vite 查询页，通过同步 REST(HTTP/JSON) 通信，无异步/消息队列。每个码对应一个 ProductInfo 持久于内存态存储（服务重启即清空，符合内存态定位）。\n\n后端包划分（均新建）：controller(TraceCodeController)、dto(request/response 与 ApiResponse)、service(TraceCodeService + SerialAllocator 域服务)、store(MemoryStore 基于 ConcurrentHashMap)、model/entity(ProductInfo)、exception(BusinessException + GlobalExceptionHandler)、config(TraceConfig 集中配置序列号规则起始值/步长，满足 NFR-5)。前端：App.vue(单页查询)、api/trace.ts(封装查询 fetch)、types.ts、vite.config.ts(dev 将 /api 代理到 http://localhost:8080 避免跨域)。\n\n数据流：生成方向 POST body→Controller 校验→TraceCodeService→SerialAllocator 分配号→构造 ProductInfo→MemoryStore.put→返回；查询方向 GET path→Controller 格式校验→TraceCodeService→MemoryStore.get→返回或 404。\n\n技术选型：后端 Java 21 + Spring Boot 3.x(>=3.2)、spring-boot-starter-validation(jakarta)、内存 ConcurrentHashMap、java.time.LocalDate(Jackson 序列化 yyyy-MM-dd)、Maven 构建；前端 Vue 3+TS+Vite，HTTP 用 fetch，无需额外库。数据库/Redis 不在本项目使用（内存态原型）。统一响应体 ApiResponse{code,message,data}，code=0 成功，错误码集中（VALIDATION_ERROR/NOT_FOUND/INTERNAL_ERROR）。",
+  "modules": [
+    {
+      "name": "TraceCodeController",
+      "responsibility": "暴露 REST 端点；接收请求、做协议与格式校验(@Valid + 手动 format 校验)，调用 Service；不含业务逻辑。",
+      "interfaces": [
+        "POST /api/v1/trace-codes/generate：入参 JSON GenerateTraceCodeRequest(enterprisePrefix,productCode,productName,batchNo,productionDate,quantity)，成功 200 返回 GenerateTraceCodeResponse{code:0,message,data:{count,traceCodes:[...]}}，校验失败 400",
+        "GET /api/v1/trace-codes/{code}：path 参数 code，成功 200 返回 TraceCodeQueryResponse{code:0,message,data:{traceCode,productName,batchNo,productionDate}}，格式非法 400，未找到 404"
+      ],
+      "dataStructures": [
+        "ApiResponse<T>{int code;String message;T data;} 统一响应体，code=0 成功",
+        "GenerateTraceCodeRequest{String enterprisePrefix;String productCode;String productName;String batchNo;LocalDate productionDate;int quantity;}",
+        "GenerateTraceCodeResponse.data{int count;List<String> traceCodes;}",
+        "TraceCodeQueryResponse.data{String traceCode;String productName;String batchNo;String productionDate;}"
+      ],
+      "dependencies": [
+        "TraceCodeService",
+        "dto 包",
+        "exception 包的 GlobalExceptionHandler(ErrorCode、ApiResponse)"
+      ]
+    },
+    {
+      "name": "TraceCodeService",
+      "responsibility": "生成/查询业务流程编排与业务校验(quantity 边界、字段逻辑)，协调序列号分配与存储写入。",
+      "interfaces": [
+        "GenerateResult generate(GenerateTraceCodeRequest req)：校验→SerialAllocator.alloc→构造 quantity 条 ProductInfo→MemoryStore 写入→返回",
+        "ProductInfoView query(String code)：MemoryStore.get；未命中抛 BusinessException(NOT_FOUND)→404"
+      ],
+      "dataStructures": [
+        "GenerateResult{int count;List<String> traceCodes;}",
+        "ProductInfoView{String traceCode;String productName;String batchNo;String productionDate;} 查询出参视图",
+        "内部方法 buildCode(prefix,productCode,serial) 统一拼接码=prefix+productCode+serial"
+      ],
+      "dependencies": [
+        "SerialAllocator",
+        "MemoryStore",
+        "dto 包",
+        "领域对象 ProductInfo",
+        "exception 包(BusinessException、ErrorCode)"
+      ]
+    },
+    {
+      "name": "SerialAllocator(域服务)",
+      "responsibility": "为[企业前缀+商品代码]分配线程安全、严格递增、全局唯一的序列号；集中维护序列号规则。",
+      "interfaces": [
+        "long alloc(String prefix, String productCode, int quantity)：返回本次分配序列的起始号 startSerial，占用区间 [startSerial,startSerial+quantity)"
+      ],
+      "dataStructures": [
+        "ConcurrentHashMap<String, AtomicLong> counters：key=prefix+productCode，value=该域已分配的最大序列号",
+        "起始默认 1、步长 1 由 TraceConfig 集中配置注入"
+      ],
+      "dependencies": [
+        "config 包 TraceConfig(起始值/步长)"
+      ]
+    },
+    {
+      "name": "MemoryStore(存储层)",
+      "responsibility": "内存态存储唯一来源，提供 traceCode→ProductInfo 的线程安全读写。",
+      "interfaces": [
+        "void put(String code, ProductInfo info)：写入，key 已存在则抛冲突(防御)",
+        "ProductInfo get(String code)：读取，未找到返回 null",
+        "int size()：可选，便于演示/自检"
+      ],
+      "dataStructures": [
+        "ConcurrentHashMap<String, ProductInfo> store，key=追溯码"
+      ],
+      "dependencies": [
+        "领域对象 ProductInfo"
+      ]
+    },
+    {
+      "name": "ProductInfo(领域对象)",
+      "responsibility": "不可变(immutable)产品信息载体，聚合在追溯码下。",
+      "interfaces": [
+        "getter 读取字段；纯 POJO 或 Java record"
+      ],
+      "dataStructures": [
+        "{String traceCode;String productName;String productCode;String batchNo;LocalDate productionDate;long serialNumber;}"
+      ],
+      "dependencies": [
+        "无(纯数据载体)"
+      ]
+    },
+    {
+      "name": "DTO 包",
+      "responsibility": "传输对象，与领域对象分离（遵循技术标准 DTO/VO 分离），承载入参与出参。",
+      "interfaces": [
+        "GenerateTraceCodeRequest、GenerateTraceCodeResponse、TraceCodeQueryResponse、ApiResponse<T>"
+      ],
+      "dataStructures": [
+        "GenerateTraceCodeRequest 字段注解：enterprisePrefix/productCode/productName/batchNo(@NotBlank)，productionDate(@NotNull@PastOrPresent)，quantity(@NotNull@Min(1)@Max(1000))",
+        "ApiResponse<T>{int code;String message;T data;boolean success;}"
+      ],
+      "dependencies": [
+        "spring-boot-starter-validation(jakarta)",
+        "Jackson"
+      ]
+    },
+    {
+      "name": "异常处理(exception 包)",
+      "responsibility": "统一错误结构{code,message,data}，将校验错、业务异常、系统异常归一化为 400/404/500，满足 NFR-3。",
+      "interfaces": [
+        "BusinessException(code,message) 业务异常载体",
+        "GlobalExceptionHandler(@ControllerAdvice)：MethodArgumentNotValidException/ConstraintViolationException→400；BusinessException.NOT_FOUND→404；其他→500",
+        "ErrorCode 常量：VALIDATION_ERROR/NOT_FOUND/INTERNAL_ERROR"
+      ],
+      "dataStructures": [
+        "ApiResponse 统一错误体{code,message,data=null}"
+      ],
+      "dependencies": [
+        "dto 包 ApiResponse",
+        "自身 ErrorCode 常量"
+      ]
+    },
+    {
+      "name": "TraceConfig(config 包)",
+      "responsibility": "集中配置序列号规则（起始值、步长），满足 NFR-5 可维护性。",
+      "interfaces": [
+        "提供 initialSerial(默认1)、incrementalStep(默认1) 注入 SerialAllocator"
+      ],
+      "dataStructures": [
+        "@ConfigurationProperties 或常量：int initialSerial=1;int incrementalStep=1;"
+      ],
+      "dependencies": [
+        "无"
+      ]
+    },
+    {
+      "name": "Vue 前端查询页(frontend)",
+      "responsibility": "FR-3 单页查询：输入追溯码→调用后端查询→展示产品名/批次/生产日期；空输入拦截提示；未找到明确提示。",
+      "interfaces": [
+        "消费 GET {API_BASE}/api/v1/trace-codes/{code}，返回 ApiResponse{code,message,data:{traceCode,productName,batchNo,productionDate}}"
+      ],
+      "dataStructures": [
+        "App.vue：input+button+结果展示区+错误提示区",
+        "api/trace.ts：fetch 封装，处理 404→展示未找到，其他错误展示 message",
+        "vite.config.ts：server.proxy 将 /api 代理到 http://localhost:8080"
+      ],
+      "dependencies": [
+        "后端查询接口",
+        "Vue 3 + TypeScript + Vite",
+        "fetch(浏览器内置)"
+      ]
+    }
+  ],
+  "serviceAttribution": [
+    {
+      "service": "后端 Spring Boot 应用（controller/service/store/dto/exception/config 全部包）",
+      "type": "new"
+    },
+    {
+      "service": "前端 Vue 3 + Vite 查询页（App.vue、api/trace.ts、vite.config.ts）",
+      "type": "new"
+    }
+  ],
+  "risks": [
+    "内存态存储导致服务重启后数据全部清空，不适合生产环境，仅限原型/演示；需在 README 中明确并提示演示数据易失。",
+    "顺序号模式易被预测，若未来需要防伪需引入随机序列号、校验位或 GS1 Luhn；当前约束明确无校验位。",
+    "序列号分配必须依赖 AtomicLong.getAndAdd 原子性；若实现为读-改-写非原子操作，并发下会产生重复码，需通过并发压测脚本验证。",
+    "内存 ConcurrentHashMap 无持久化与多节点共享，横向扩容或跨进程部署会导致码不能互通，超出原型范围需提示。",
+    "GlobalExceptionHandler 需完整覆盖 validation 与业务异常，否则错误码不统一，前端与调用方处理不一致。",
+    "前端开发态依赖 vite 代理，若后端端口或代理配置不一致将出现跨域/连通失败，需在文档中固定端口约定。"
+  ]
+}
