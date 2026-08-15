@@ -1,6 +1,6 @@
 """标准集中存储：SQLite。
 
-多个 harness 通过 streamable-http MCP 连同一个 server（orchestrator 8080），
+多个 harness 通过 streamable-http MCP 连同一个 server（orchestrator 3087），
 server 读这一份 SQLite，所以「标准定义」集中在一处，不落在各 harness 本地文件。
 
 首次启动从 standards/*.md 导入种子数据；之后以 SQLite 为准（UI/CRUD/MCP 都读写它）。

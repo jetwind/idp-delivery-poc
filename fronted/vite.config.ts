@@ -9,7 +9,7 @@ import { inspectAttr } from 'kimi-plugin-inspect-react'
 // 强制 CORS preflight，而 dsh 从不回 preflight）。
 const DSH_BACKEND = process.env.DSH_BACKEND || 'http://127.0.0.1:3086'
 // LangGraph 编排服务（Python FastAPI，orchestrator/）。
-const FLOW_BACKEND = process.env.FLOW_BACKEND || 'http://127.0.0.1:8080'
+const FLOW_BACKEND = process.env.FLOW_BACKEND || 'http://127.0.0.1:3087'
 
 // https://vite.dev/config/
 export default defineConfig({

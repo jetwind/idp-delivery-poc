@@ -6,7 +6,7 @@
 前端 React (3000)
    │ HTTP  /flow/start /flow/state /flow/resume
    ▼
-LangGraph 编排服务 (Python, 8080)   ← 本目录
+LangGraph 编排服务 (Python, 3087)   ← 本目录
    │ HTTP session.* + specStore.*  + WebSocket events.mux
    ▼
 harness 执行层 (3086, dsh web)
@@ -61,12 +61,12 @@ cd ../deepseek-harness  # harness 仓库（同级的源码树）
 pnpm dsh web --patch apps/web/tests/spec-protocol.overlay.yml --port 3086
 ```
 
-### 2. 编排服务（8080）
+### 2. 编排服务（3087）
 
 ```sh
 cd orchestrator
 python -m pip install -r requirements.txt
-python -m uvicorn server:app --host 127.0.0.1 --port 8080
+python -m uvicorn server:app --host 127.0.0.1 --port 3087
 ```
 
 ### 3. 端到端验证（不接前端，直接跑图）

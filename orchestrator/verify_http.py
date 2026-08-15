@@ -9,7 +9,7 @@ import requests
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = "http://localhost:8080"  # 直连编排服务（带 CORS），/flow/start、/flow/resume 同步阻塞几分钟
+BASE = "http://localhost:3087"  # 直连编排服务（带 CORS），/flow/start、/flow/resume 同步阻塞几分钟
 # 工作目录：交付文件夹下的 examples/project-delivery（跨平台推导）。
 CWD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples", "project-delivery")
 

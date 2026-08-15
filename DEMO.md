@@ -5,12 +5,12 @@
 ## 架构与三服务
 
 ```
-前端 React (3000)  →  LangGraph 编排 (8080)  →  harness 执行层 (3086)
+前端 React (3000)  →  LangGraph 编排 (3087)  →  harness 执行层 (3086)
   聊天输入需求          阶段图 + gate/question     各阶段 agent（挂 preset）真实干活
 ```
 
 - **前端 3000**：输入需求、回答问题、点 gate、看阶段推进与产物。
-- **编排 8080**：LangGraph 图（`orchestrator/`），驱动 harness、传递产物、暂停等人工。
+- **编排 3087**：LangGraph 图（`orchestrator/`），驱动 harness、传递产物、暂停等人工。
 - **harness 3086**：dsh web 实例，挂阶段 preset，跑 agent。
 
 ## 前置条件
@@ -63,15 +63,15 @@ pnpm dsh web --port 3086
 
 看到 `dsh web: http://127.0.0.1:3086` 即成功。
 
-## 步骤 3：启动编排服务（8080）
+## 步骤 3：启动编排服务（3087）
 
 ```powershell
 cd ..\deepseek-harness-delivery\orchestrator
 python -m pip install -r requirements.txt
-python -m uvicorn server:app --host 127.0.0.1 --port 8080
+python -m uvicorn server:app --host 127.0.0.1 --port 3087
 ```
 
-看到 `Uvicorn running on http://127.0.0.1:8080` 即成功。
+看到 `Uvicorn running on http://127.0.0.1:3087` 即成功。
 
 ## 步骤 4：启动前端（3000）
 
@@ -147,7 +147,7 @@ powershell -ExecutionPolicy Bypass -File harness-reset.ps1
 | 现象 | 原因 | 解决 |
 |---|---|---|
 | 前端接口 403 | dsh 的 Origin 围栏 | 确认 `fronted/vite.config.ts` 的 `/api` proxy `changeOrigin: false`（已配置） |
-| 编排接口 502/长连接断 | 走 Vite proxy 转发 `/flow` | 前端已直连 8080（`src/api/flow.ts` 的 `FLOW_BASE`），不要改回相对路径 |
+| 编排接口 502/长连接断 | 走 Vite proxy 转发 `/flow` | 前端已直连 3087（`src/api/flow.ts` 的 `FLOW_BASE`），不要改回相对路径 |
 | 页面显示「离线 mock」而非「实时数据」 | 3086 后端没连上 | 检查 3086 是否在跑 |
 
 ## 关键设计说明（想改代码前读）

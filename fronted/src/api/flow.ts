@@ -1,5 +1,5 @@
 /**
- * LangGraph 编排服务（orchestrator/，FastAPI 8080）的 transport 层。
+ * LangGraph 编排服务（orchestrator/，FastAPI 3087）的 transport 层。
  *
  * 前端直连编排服务（带 CORS）。流水线是「启动 → 轮询 state + events → 处理
  * pending interrupt（question 回答 / gate 决策 / approval）→ resume」的循环。
@@ -99,7 +99,7 @@ export interface FlowFileContent {
 // 前端轮询 /flow/state（阶段/待处理项）与 /flow/events（实时日志）。
 // 注意用 127.0.0.1 而非 localhost：uvicorn 只监听 IPv4，localhost 会先解析到
 // IPv6 ::1 再回退，每个请求多 3-5s，轮询堆积会把 resume 卡住。
-const FLOW_BASE = 'http://127.0.0.1:8080'
+const FLOW_BASE = 'http://127.0.0.1:3087'
 
 async function flowJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${FLOW_BASE}${path}`, {
