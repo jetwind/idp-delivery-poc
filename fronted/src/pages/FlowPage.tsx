@@ -27,6 +27,7 @@ export default function FlowPage() {
   const [customs, setCustoms] = useState<Record<string, string>>({})
   const [logs, setLogs] = useState<FlowEvent[]>([])
   const [running, setRunning] = useState(false)
+  const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const seenRef = useRef<Set<string>>(new Set())
   const logRef = useRef<HTMLDivElement | null>(null)
@@ -128,11 +129,14 @@ export default function FlowPage() {
   function reset() {
     stopPolling()
     setThreadId(null); setSnapshot(null); setError(null); setAnswers({}); setCustoms({})
-    setLogs([]); setRunning(false); seenRef.current = new Set()
+    setLogs([]); setRunning(false); setSelectedStage(null); seenRef.current = new Set()
   }
 
   const pending = snapshot?.pending ?? null
   const stageIndex = snapshot?.stage_index ?? 0
+  const selectedStageName = selectedStage ? STAGES.find(s => s.id === selectedStage)?.name : undefined
+  const shownLogs = selectedStageName ? logs.filter(e => e.stage === selectedStageName) : logs
+  const selectedOutputs = selectedStage && snapshot?.artifacts ? (snapshot.artifacts[selectedStage] ?? []) : []
 
   return (
     <div>
@@ -142,26 +146,36 @@ export default function FlowPage() {
         extra={threadId ? <Button variant="outline" size="sm" onClick={reset}><RotateCcw className="w-3.5 h-3.5 mr-1" />重新开始</Button> : undefined}
       />
 
-      {/* 阶段条 */}
+      {/* 阶段条（可点击回溯） */}
       <div className="bg-white rounded-lg border border-slate-200/80 px-5 py-4 mb-4">
         <div className="flex items-center">
-          {STAGES.map((s, i) => (
-            <div key={s.id} className="flex items-center flex-1 last:flex-none">
-              <div className="flex flex-col items-center">
-                <span className={cn('w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-semibold',
-                  i < stageIndex ? 'bg-emerald-500 text-white' : i === stageIndex ? 'bg-indigo-600 text-white ring-4 ring-indigo-100' : 'bg-slate-100 text-slate-400 border border-slate-200')}>
-                  {i < stageIndex ? <CheckCircle2 className="w-4 h-4" /> : i + 1}
-                </span>
-                <span className={cn('mt-2 text-xs', i === stageIndex ? 'text-indigo-600 font-semibold' : i < stageIndex ? 'text-emerald-600' : 'text-slate-400')}>{s.name}</span>
+          {STAGES.map((s, i) => {
+            const done = i < stageIndex
+            const current = i === stageIndex
+            const active = selectedStage === s.id
+            return (
+              <div key={s.id} className="flex items-center flex-1 last:flex-none">
+                <button onClick={() => setSelectedStage(active ? null : s.id)}
+                  className="flex flex-col items-center group" title={done || current ? '点击查看该阶段日志与产出' : '尚未开始'}>
+                  <span className={cn('w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-semibold transition-all',
+                    done ? 'bg-emerald-500 text-white' : current ? 'bg-indigo-600 text-white ring-4 ring-indigo-100' : 'bg-slate-100 text-slate-400 border border-slate-200',
+                    active && 'ring-2 ring-indigo-400 ring-offset-1')}>
+                    {done ? <CheckCircle2 className="w-4 h-4" /> : i + 1}
+                  </span>
+                  <span className={cn('mt-2 text-xs group-hover:underline',
+                    current ? 'text-indigo-600 font-semibold' : done ? 'text-emerald-600' : 'text-slate-400',
+                    active && 'font-semibold')}>{s.name}</span>
+                </button>
+                {i < STAGES.length - 1 && (
+                  <div className="flex-1 mx-3 mb-6 h-1 rounded-full bg-slate-100 overflow-hidden">
+                    <div className={cn('h-full rounded-full', done ? 'bg-emerald-400 w-full' : 'w-0')} />
+                  </div>
+                )}
               </div>
-              {i < STAGES.length - 1 && (
-                <div className="flex-1 mx-3 mb-6 h-1 rounded-full bg-slate-100 overflow-hidden">
-                  <div className={cn('h-full rounded-full', i < stageIndex ? 'bg-emerald-400 w-full' : 'w-0')} />
-                </div>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
+        <div className="mt-2 text-[11px] text-slate-400">点击已开始/进行中的阶段可回溯查看其日志与产出；再次点击取消。</div>
       </div>
 
       {/* 输入需求 */}
@@ -206,16 +220,34 @@ export default function FlowPage() {
             <div className="flex items-center gap-2">
               <Terminal className="w-4 h-4 text-slate-500" />
               <span className="text-[13px] font-semibold text-slate-800">运行日志</span>
-              {running && <Pill tone="blue" dot>运行中</Pill>}
-              {logs.length > 0 && <span className="text-xs text-slate-400">{logs.length} 条</span>}
+              {selectedStageName ? <Pill tone="violet">{selectedStageName}</Pill> : (running && <Pill tone="blue" dot>运行中</Pill>)}
+              {shownLogs.length > 0 && <span className="text-xs text-slate-400">{shownLogs.length} 条</span>}
             </div>
+            {selectedStage && (
+              <button onClick={() => setSelectedStage(null)} className="text-xs text-indigo-600 hover:underline">显示全部阶段</button>
+            )}
           </div>
           <div ref={logRef} className="px-5 py-3 max-h-[420px] overflow-y-auto space-y-1.5">
-            {logs.length === 0 ? (
-              <div className="text-xs text-slate-400">启动中，等待 agent 产出…</div>
+            {shownLogs.length === 0 ? (
+              <div className="text-xs text-slate-400">{selectedStage ? '该阶段暂无日志（尚未运行或未产生输出）' : '启动中，等待 agent 产出…'}</div>
             ) : (
-              logs.map((e, i) => <LogItem key={i} e={e} />)
+              shownLogs.map((e, i) => <LogItem key={i} e={e} />)
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 选中阶段的产出 */}
+      {threadId && selectedStage && selectedOutputs.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-100">
+            <FileText className="w-4 h-4 text-slate-500" />
+            <span className="text-[13px] font-semibold text-slate-800">{selectedStageName} 阶段产出</span>
+          </div>
+          <div className="px-5 py-3 flex flex-wrap gap-1.5">
+            {selectedOutputs.map(f => (
+              <code key={f} className="text-xs font-mono text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{f}</code>
+            ))}
           </div>
         </div>
       )}
