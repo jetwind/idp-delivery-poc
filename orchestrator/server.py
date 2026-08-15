@@ -62,7 +62,7 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
         "stage": stage_name,
         "done": stage_index >= len(STAGES),
         "pending": pending,
-        "spec_cache": values.get("spec_cache", {}),
+        "artifacts": values.get("artifacts", {}),
     }
 
 
@@ -73,7 +73,7 @@ async def start(req: StartRequest) -> dict[str, Any]:
         "requirement_text": req.requirement_text,
         "cwd": req.cwd,
         "stage_index": 0,
-        "spec_cache": {},
+        "artifacts": {},
     }
     await graph.ainvoke(initial, config=_config(thread_id))
     return await _snapshot(thread_id)
