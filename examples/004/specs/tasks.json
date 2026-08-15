@@ -1,0 +1,124 @@
+{
+  "title": "任务拆解",
+  "services": [
+    {
+      "name": "trace-code-service",
+      "type": "new",
+      "stack": "后端：Java 21 + Spring Boot 3.2.x + Maven（spring-boot-starter-web、starter-validation），内存态存储"
+    },
+    {
+      "name": "trace-query-web",
+      "type": "new",
+      "stack": "前端：Vue 3 + TypeScript + Vite（原生 fetch）"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "搭建后端工程骨架与基础设施",
+      "service": "trace-code-service",
+      "acceptanceCriteria": [
+        "mvn spring-boot:run 可启动，Java 21 编译通过，默认端口 8080，无报错退出",
+        "TraceCodeProperties 绑定集中配置 trace-code.prefix-length=3 / product-code-length=3 / serial-number-length=8，并提供只读派生能力（总长 14、序列号容量上限），无散落硬编码",
+        "ApiResponse<T>{code,message,data} 统一响应体、ErrorCode 错误码枚举、TraceCodeFormatException（→400）、TraceCodeNotFoundException（→404）定义完备",
+        "GlobalExceptionHandler（@RestControllerAdvice）已挂载：格式/校验异常→400、未找到→404、其它异常→500，响应体均为统一 ApiResponse 格式",
+        "提供探测端点（如 GET /api/v1/ping）返回统一成功响应，验证请求→Controller→统一响应链路可用"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "T2",
+      "title": "实现内存态存储与领域模型",
+      "service": "trace-code-service",
+      "acceptanceCriteria": [
+        "ProductRecord 领域对象含 traceCode / companyPrefix / productCode / productName / batchNo / productionDate 六个字段，与详细设计一致",
+        "InMemoryTraceCodeStore 基于线程安全 Map 实现，提供 save(traceCode, record) 与 findByTraceCode(traceCode)（未命中返回 empty）",
+        "单元测试：保存后可按码查回且字段一致；未保存的码返回空；并发写入不同码不丢失数据"
+      ],
+      "dependencies": ["T1"]
+    },
+    {
+      "id": "T3",
+      "title": "实现序列号分配器与追溯码生成器",
+      "service": "trace-code-service",
+      "acceptanceCriteria": [
+        "generate(companyPrefix, productCode, startSerial, count) 返回 count 个 TraceCodeItem，traceCode = 3 位前缀 + 3 位商品码 + 8 位补零序列号，总长 14 位纯数字",
+        "序列号从 startSerial 起连续递增，1 格式化为 00000001（高位补零 8 位）",
+        "段长全部读自 TraceCodeProperties，代码中无散落硬编码",
+        "单元测试：连续生成、补零格式、跨商品序列号独立、序列号超出 8 位容量时抛业务异常（防溢出，不产生非法码）"
+      ],
+      "dependencies": ["T1"]
+    },
+    {
+      "id": "T4",
+      "title": "实现生成用例编排服务",
+      "service": "trace-code-service",
+      "acceptanceCriteria": [
+        "generateTraceCodes(req) 以 (companyPrefix, productCode) 为粒度原子预留连续序列区间 [next, next+count)，委托 Generator 组装后写入 Store，返回码列表",
+        "同一商品代码多次生成：序列号严格递增、追加不覆盖旧记录（旧码仍可查询）",
+        "并发单测：多线程并发对同一商品生成，码总数正确、序列号集合无重复",
+        "不同商品代码各自从 1 独立计数、互不干扰",
+        "兜底校验：N<1 / N>1000 / 必要入参缺失或为空 → 抛参数校验异常（映射 400）"
+      ],
+      "dependencies": ["T2", "T3"]
+    },
+    {
+      "id": "T5",
+      "title": "实现按码查询服务",
+      "service": "trace-code-service",
+      "acceptanceCriteria": [
+        "空码、含非数字字符、总长非 14、无法按定长规则切分 → 抛 TraceCodeFormatException（映射 400）",
+        "格式合法但未入库 → 抛 TraceCodeNotFoundException（映射 404）",
+        "命中 → 返回 productName / batchNo / productionDate，且与生成时一致",
+        "单元测试覆盖命中 / 未命中 / 格式非法 / 空 全部分支"
+      ],
+      "dependencies": ["T2"]
+    },
+    {
+      "id": "T6",
+      "title": "实现 REST 接口层",
+      "service": "trace-code-service",
+      "acceptanceCriteria": [
+        "POST /api/v1/trace-codes：jakarta validation + 格式校验（N∈[1,1000]、必填非空、前缀/商品码纯数字且定长、生产日期合法）；成功 200 返回 ApiResponse<TraceCodeGenResponse>（含 N 个码及结构化三元组）；非法入参 → 400",
+        "GET /api/v1/trace-codes/{code}：成功 200 返回产品三元组；空/格式非法 → 400；未入库 → 404",
+        "MockMvc/@SpringBootTest 集成测试覆盖：生成成功、N 非法 400、字段缺失 400、查询 200/400/404",
+        "集成级并发验证：并发 POST 同一商品返回的码无重复、序列号递增"
+      ],
+      "dependencies": ["T4", "T5"]
+    },
+    {
+      "id": "T7",
+      "title": "搭建前端工程并实现查询页面",
+      "service": "trace-query-web",
+      "acceptanceCriteria": [
+        "npm run dev 可启动，页面含追溯码输入框与查询按钮",
+        "空输入点击查询：阻止请求并提示「请输入追溯码」",
+        "码存在：页面展示产品名、批次、生产日期",
+        "码不存在：页面给出明确的未找到提示（404 分支）",
+        "服务异常（非 200/404）：展示错误信息",
+        "与后端联调通过（Vite 开发代理或后端 CORS 放行前端源，解决跨域）"
+      ],
+      "dependencies": ["T6"]
+    },
+    {
+      "id": "T8",
+      "title": "健壮性收尾与运行文档",
+      "service": "trace-code-service",
+      "acceptanceCriteria": [
+        "边界测试：N=1、N=1000 成功生成；N=0、N=1001、N 非数字 → 400，均通过",
+        "并发与独立性测试：并发同商品无重复码；跨商品序列号独立计数",
+        "序列号容量溢出防御：预留前校验，超出 8 位容量返回明确业务错误，不产生非法码",
+        "README：前后端启动步骤、REST API 说明、内存态风险声明（重启清空）、段长集中配置说明（3/3/8、总长 14）"
+      ],
+      "dependencies": ["T6", "T7"]
+    }
+  ],
+  "taskRings": [
+    ["T1"],
+    ["T2", "T3"],
+    ["T4", "T5"],
+    ["T6"],
+    ["T7"],
+    ["T8"]
+  ]
+}
