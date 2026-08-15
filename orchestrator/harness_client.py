@@ -87,6 +87,19 @@ class HarnessClient:
                 return bool(item.get("running"))
         return False
 
+    async def session_projection(self, session_id: str) -> dict[str, Any] | None:
+        """从 session.list 取某会话的投影：running / todos（todo_write 子步骤）/ title。"""
+        value = await self._legacy("session.list", {})
+        for item in value.get("items", []):
+            if item.get("sessionId") == session_id:
+                proj = (item.get("projections") or {}).get("values", {}) or {}
+                return {
+                    "running": bool(item.get("running")),
+                    "todos": proj.get("todos") or [],
+                    "title": proj.get("title") or "",
+                }
+        return None
+
     async def session_history(
         self, session_id: str, before_seq: int | None = None, max_messages: int = 10,
     ) -> dict[str, Any]:

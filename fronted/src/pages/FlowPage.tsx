@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getFlowEvents, getFlowFile, getFlowFiles, getFlowState, resumeFlow, startFlow, type FlowEvent, type FlowFile, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt } from '@/api/flow'
+import { getFlowEvents, getFlowFile, getFlowFiles, getFlowState, resumeFlow, startFlow, type FlowEvent, type FlowFile, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt, type TodoItem } from '@/api/flow'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare, Folder } from 'lucide-react'
+import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare, Folder, ListChecks, Circle } from 'lucide-react'
 
 const STAGES = [
   { id: 'requirements', name: '01 需求' },
@@ -26,6 +26,7 @@ export default function FlowPage() {
   const [answers, setAnswers] = useState<Record<string, string[]>>({})
   const [customs, setCustoms] = useState<Record<string, string>>({})
   const [logs, setLogs] = useState<FlowEvent[]>([])
+  const [todos, setTodos] = useState<TodoItem[]>([])
   const [running, setRunning] = useState(false)
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -56,6 +57,7 @@ export default function FlowPage() {
       try {
         const ev = await getFlowEvents(threadId)
         setRunning(ev.running)
+        setTodos(ev.todos ?? [])
         const fresh = ev.events.filter(e => {
           const key = `${e.session_id ?? '?'}:${e.seq}`
           if (seenRef.current.has(key)) return false
@@ -140,7 +142,7 @@ export default function FlowPage() {
   function reset() {
     stopPolling()
     setThreadId(null); setSnapshot(null); setError(null); setAnswers({}); setCustoms({})
-    setLogs([]); setRunning(false); setSelectedStage(null); seenRef.current = new Set()
+    setLogs([]); setTodos([]); setRunning(false); setSelectedStage(null); seenRef.current = new Set()
   }
 
   const pending = snapshot?.pending ?? null
@@ -233,6 +235,32 @@ export default function FlowPage() {
               <div>
                 <div className="text-[13px] font-medium text-slate-800">「{snapshot.stage}」阶段执行中…</div>
                 <div className="text-xs text-slate-500 mt-0.5">harness agent 正在真实干活，稍候会出现待确认项</div>
+              </div>
+            </div>
+          )}
+
+          {/* 执行子步骤（agent 的 todo_write 计划 + 进度） */}
+          {!snapshot.done && todos.length > 0 && (
+            <div className="bg-white rounded-lg border border-slate-200/80 px-5 py-4">
+              <div className="flex items-center gap-2 mb-3">
+                <ListChecks className="w-4 h-4 text-indigo-500" />
+                <span className="text-[13px] font-semibold text-slate-800">执行子步骤</span>
+                <span className="text-xs text-slate-400">{todos.filter(t => t.status === 'completed').length}/{todos.length} 完成</span>
+              </div>
+              <div className="space-y-1.5">
+                {todos.map((t, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs">
+                    {t.status === 'completed'
+                      ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                      : t.status === 'in_progress'
+                        ? <Loader2 className="w-3.5 h-3.5 text-indigo-500 mt-0.5 shrink-0 animate-spin" />
+                        : <Circle className="w-3.5 h-3.5 text-slate-300 mt-0.5 shrink-0" />}
+                    <span className={cn('break-words',
+                      t.status === 'completed' ? 'text-slate-400 line-through' : t.status === 'in_progress' ? 'text-indigo-700 font-medium' : 'text-slate-500')}>
+                      {t.content}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

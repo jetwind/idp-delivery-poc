@@ -342,8 +342,10 @@ async def events(thread_id: str) -> dict[str, Any]:
     stage_index = values.get("stage_index", 0)
     stage = STAGES[stage_index]["name"] if stage_index < len(STAGES) else "完成"
     if not session_id:
-        return {"thread_id": thread_id, "session_id": None, "running": False, "stage": stage, "events": []}
-    running = await client.session_running(session_id)
+        return {"thread_id": thread_id, "session_id": None, "running": False, "todos": [], "stage": stage, "events": []}
+    proj = await client.session_projection(session_id) or {}
+    running = proj.get("running", False)
+    todos = proj.get("todos", [])
     history = await client.session_history(session_id, max_messages=60)
     items: list[dict[str, Any]] = []
     for entry in history.get("events", []):
@@ -353,7 +355,7 @@ async def events(thread_id: str) -> dict[str, Any]:
             summarized["stage"] = stage
             items.append(summarized)
     items.sort(key=lambda e: e.get("seq") or 0)
-    return {"thread_id": thread_id, "session_id": session_id, "running": running, "stage": stage, "events": items}
+    return {"thread_id": thread_id, "session_id": session_id, "running": running, "todos": todos, "stage": stage, "events": items}
 
 
 @app.get("/flow/files/{thread_id}")

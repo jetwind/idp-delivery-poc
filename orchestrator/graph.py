@@ -55,6 +55,7 @@ STAGES: list[dict[str, Any]] = [
         "output_files": ["specs/requirements.md"],
         "task": (
             "当前处于【01 需求】阶段。请阅读工作区已有材料，把用户原始需求收敛为清晰、可验收、可测试的需求规格。\n\n"
+            "先用 todo_write 把本阶段工作拆成清晰子步骤（如阅读材料、澄清歧义、编写规格、定稿确认），随进展把完成步骤标 completed、进行中步骤标 in_progress。\n\n"
             "采用业界需求方法论：\n"
             "1. 用户故事/用例：为每个核心场景写「作为<角色>，我希望<能力>，以便<价值>」，标注优先级（MoSCoW：Must/Should/Could/Won't）。\n"
             "2. 验收标准：每条需求给出 Given/When/Then 形式、可自动化验证的验收标准。\n"
@@ -76,6 +77,7 @@ STAGES: list[dict[str, Any]] = [
         "output_files": ["docs/design.md"],
         "task": (
             "当前处于【02 详细设计】阶段。基于下面给出的已定稿需求规格，产出可直接指导实现与任务拆分的详细设计。\n\n"
+            "先用 todo_write 把本阶段工作拆成清晰子步骤（业务设计、架构设计、模块设计、编写文档），随进展更新状态。\n\n"
             "设计覆盖三个层次：\n"
             "1. 业务设计：业务流程（关键路径/异常路径）、领域模型（实体/值对象/聚合及关系）、业务规则。\n"
             "2. 架构设计：技术架构与模块划分、服务边界（标注「新建服务」或「升级现有服务」）、数据流与通信方式（同步/异步）、"
@@ -96,6 +98,7 @@ STAGES: list[dict[str, Any]] = [
         "output_files": ["specs/tasks.md"],
         "task": (
             "当前处于【03 任务】阶段。基于下面给出的需求规格与详细设计，把工作拆分成可独立执行、可验收的开发任务，并按依赖编排执行顺序。\n\n"
+            "先用 todo_write 把本阶段工作拆成清晰子步骤（服务清单、任务拆解、依赖编排、编写文档），随进展更新状态。\n\n"
             "用 INVEST 原则拆分每个任务（Independent 独立、Negotiable 可协商、Valuable 有价值、Estimable 可估算、Small 足够小、Testable 可测试）：\n"
             "1. 每个任务明确归属到具体服务，标注「新建服务」或「升级现有服务」，技术栈：后端 Java 21 + Spring Boot、前端 Vue。\n"
             "2. 标注任务之间的依赖（哪些任务必须在哪些任务之后）。\n"
@@ -114,6 +117,7 @@ STAGES: list[dict[str, Any]] = [
         "output_files": ["specs/implementation.md", "services/", "frontend/"],
         "task": (
             "当前处于【04 编码】阶段。基于下面给出的任务拆解（specs/tasks.md）与详细设计（docs/design.md），逐环实现代码。\n\n"
+            "先用 todo_write 把本阶段工作拆成清晰子步骤（逐环实现、写单元测试、运行验证、编写实现说明），随进展更新状态。\n\n"
             "实现要求：\n"
             "1. 按任务环顺序推进；同一环内互不依赖的任务用 subagent 并行委派，或用 workflow 编排多代理流程。\n"
             "2. 每个任务实现后写单元测试，并实际运行验证（编译通过、测试通过、应用可启动）。\n"
@@ -132,6 +136,7 @@ STAGES: list[dict[str, Any]] = [
         "output_files": ["docs/test-report.md"],
         "task": (
             "当前处于【05 测试】阶段。对照下面给出的需求验收标准、实现说明与任务清单，逐项验证交付质量。\n\n"
+            "先用 todo_write 把本阶段工作拆成清晰子步骤（单元测试、接口测试、e2e 测试、编写报告），随进展更新状态。\n\n"
             "测试覆盖三层：\n"
             "1. 单元测试：运行后端（mvn test / gradle test）与前端（npm test）的单元测试，确认全部通过。\n"
             "2. 接口测试：对核心 REST 接口编写并执行接口测试（构造正常/边界/异常用例）。\n"

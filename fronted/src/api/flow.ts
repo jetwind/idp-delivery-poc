@@ -75,12 +75,19 @@ export interface FlowEvent {
   source?: string | null
 }
 
+/** agent 的 todo_write 子步骤（执行中/待办/已完成）。 */
+export interface TodoItem {
+  content: string
+  status: 'in_progress' | 'pending' | 'completed'
+}
+
 export interface FlowEvents {
   thread_id: string
   session_id: string | null
   running: boolean
   stage: string
   events: FlowEvent[]
+  todos: TodoItem[]
 }
 
 /** 工作区里的一个文件（相对 cwd 的路径）。 */
