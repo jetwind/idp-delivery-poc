@@ -691,7 +691,7 @@ async def agents_models() -> dict[str, Any]:
 
 @app.get("/agents/config")
 async def agents_config() -> dict[str, Any]:
-    """每个数字员工当前的模型配置（未配置的阶段返回 null）。"""
+    """每个数字员工当前的模型/权限配置（未配置的阶段返回 null）。"""
     configs = config_store.get_all_configs()
     result = []
     for s in STAGES:
@@ -699,7 +699,12 @@ async def agents_config() -> dict[str, Any]:
         result.append({
             "id": s["id"],
             "name": s["name"],
-            "config": cfg or None,
+            "config": {
+                "provider": cfg["provider"],
+                "model": cfg["model"],
+                "reasoningEffort": cfg["reasoning_effort"],
+                "permission": cfg.get("permission"),
+            } if cfg else None,
         })
     return {"configs": result}
 
@@ -708,13 +713,16 @@ class AgentConfigRequest(BaseModel):
     provider: str
     model: str
     reasoningEffort: str
+    permission: str | None = None
 
 
 @app.put("/agents/config")
 async def agents_set_config(stage: str, req: AgentConfigRequest) -> dict[str, Any]:
     if stage not in _STAGE_IDS:
         raise HTTPException(status_code=400, detail=f"未知阶段：{stage}")
-    config_store.set_config(stage, req.provider, req.model, req.reasoningEffort)
+    if req.permission is not None and req.permission not in config_store.PERMISSIONS:
+        raise HTTPException(status_code=400, detail=f"非法权限：{req.permission}，可用：{', '.join(config_store.PERMISSIONS)}")
+    config_store.set_config(stage, req.provider, req.model, req.reasoningEffort, req.permission)
     return {"stage": stage, "ok": True}
 
 

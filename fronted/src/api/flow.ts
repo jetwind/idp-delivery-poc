@@ -288,6 +288,7 @@ export interface AgentModelConfig {
   provider: string
   model: string
   reasoningEffort: string
+  permission?: string | null
 }
 
 export interface AgentConfigRow {
@@ -309,7 +310,12 @@ export async function getAgentConfigs(): Promise<{ configs: AgentConfigRow[] }> 
       id: c.id,
       name: c.name,
       config: c.config
-        ? { provider: c.config.provider, model: c.config.model, reasoningEffort: c.config.reasoning_effort }
+        ? {
+            provider: c.config.provider,
+            model: c.config.model,
+            reasoningEffort: c.config.reasoningEffort,
+            permission: c.config.permission ?? null,
+          }
         : null,
     })),
   }
@@ -319,6 +325,11 @@ export async function getAgentConfigs(): Promise<{ configs: AgentConfigRow[] }> 
 export function setAgentConfig(stage: string, cfg: AgentModelConfig): Promise<{ ok: boolean }> {
   return flowJson(`/agents/config?stage=${encodeURIComponent(stage)}`, {
     method: 'PUT',
-    body: JSON.stringify({ provider: cfg.provider, model: cfg.model, reasoningEffort: cfg.reasoningEffort }),
+    body: JSON.stringify({
+      provider: cfg.provider,
+      model: cfg.model,
+      reasoningEffort: cfg.reasoningEffort,
+      permission: cfg.permission ?? null,
+    }),
   })
 }

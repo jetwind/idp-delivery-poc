@@ -64,6 +64,16 @@ class HarnessClient:
     async def session_models(self, session_id: str) -> dict[str, Any]:
         return await self._legacy("session.models", {"sessionId": session_id})
 
+    async def execute_command(self, session_id: str, line: str) -> dict[str, Any]:
+        """执行 slash command（如 /permission <preset>），走 Typert Remote 端点 commands/execute。"""
+        body = {
+            "type": "client-request",
+            "rpcId": self._rpc_id(),
+            "method": "commands/execute",
+            "payload": {"args": {"agentId": session_id, "line": line}},
+        }
+        return await self._post("/api/commands/execute", body)
+
     async def prompt(self, session_id: str, text: str) -> dict[str, Any]:
         return await self._legacy(
             "session.prompt",

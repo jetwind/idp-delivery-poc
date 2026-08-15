@@ -40,6 +40,7 @@ export default function AgentsCenter() {
   const [permAgent, setPermAgent] = useState<DigitalAgent | null>(null)
   const [editModel, setEditModel] = useState('')
   const [editEffort, setEditEffort] = useState('')
+  const [editPerm, setEditPerm] = useState('workspace-write')
 
   useEffect(() => {
     let alive = true
@@ -59,6 +60,7 @@ export default function AgentsCenter() {
     setPermAgent(a)
     setEditModel(cfg?.model ?? (models[0]?.model ?? ''))
     setEditEffort(cfg?.reasoningEffort ?? (models.find(m => m.model === (cfg?.model ?? models[0]?.model))?.defaultEffort ?? ''))
+    setEditPerm(cfg?.permission ?? 'workspace-write')
   }
 
   async function saveModel() {
@@ -66,7 +68,7 @@ export default function AgentsCenter() {
     const m = models.find(x => x.model === editModel)
     const provider = m?.provider ?? 'deepseek-official'
     try {
-      await setAgentConfig(permAgent.id, { provider, model: editModel, reasoningEffort: editEffort })
+      await setAgentConfig(permAgent.id, { provider, model: editModel, reasoningEffort: editEffort, permission: editPerm })
       const cf = await getAgentConfigs()
       setConfigs(cf.configs)
       setPermAgent(null)
@@ -304,9 +306,21 @@ export default function AgentsCenter() {
                     <p className="text-[11px] text-slate-400">简单阶段可用 flash + off，复杂阶段（如编码）用 pro + high/max。</p>
                   </div>
                 </div>
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2"><ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />文件权限</div>
+                  <div className="space-y-2">
+                    <select value={editPerm} onChange={e => setEditPerm(e.target.value)}
+                      className="w-full h-8 rounded-md border border-slate-200 px-2 text-xs bg-white">
+                      <option value="read-only">read-only（只读，不能写文件）</option>
+                      <option value="workspace-write">workspace-write（只能写工作区）</option>
+                      <option value="danger-full-access">full-access（完全访问）</option>
+                    </select>
+                    <p className="text-[11px] text-slate-400">映射到 harness 沙箱：只读 / 工作区可写 / 完全访问。</p>
+                  </div>
+                </div>
                 <div className="flex justify-end gap-2 pt-1">
                   <Button variant="outline" onClick={() => setPermAgent(null)}>取消</Button>
-                  <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={saveModel}><CheckCircle2 className="w-4 h-4 mr-1" />保存模型配置</Button>
+                  <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={saveModel}><CheckCircle2 className="w-4 h-4 mr-1" />保存配置</Button>
                 </div>
               </div>
             </>
