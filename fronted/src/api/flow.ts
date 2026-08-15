@@ -206,3 +206,39 @@ export function deleteStandard(stage: string, name: string): Promise<{ ok: boole
     method: 'DELETE',
   })
 }
+
+// ---- 数字员工（阶段 agent）+ 成本统计 ----
+
+export interface DigitalAgent {
+  id: string
+  name: string
+  preset: string
+  role: string
+  desc: string
+  knowledge: string[]
+}
+
+export interface AgentCost {
+  id: string
+  name: string
+  sessions: number
+  inputTokens: number
+  outputTokens: number
+  cost: number
+}
+
+export interface AgentsCost {
+  agents: AgentCost[]
+  totalCost: number
+  totalTokens: number
+}
+
+/** 数字员工列表（5 个阶段 agent）。 */
+export function getAgents(): Promise<{ agents: DigitalAgent[] }> {
+  return flowJson('/agents')
+}
+
+/** 数字员工成本统计（按 preset 聚合 token 用量与成本）。 */
+export function getAgentsCost(): Promise<AgentsCost> {
+  return flowJson('/agents/cost')
+}

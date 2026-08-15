@@ -542,6 +542,82 @@ async def mcp_endpoint(request: Request):
     return JSONResponse(responses[0])
 
 
+# ---- 数字员工（阶段 agent）+ 成本统计 ----
+
+_AGENT_META = {
+    "requirements": {"role": "需求澄清", "desc": "需求资料整理、业务规则提取、需求规格编制"},
+    "design": {"role": "方案设计", "desc": "业务设计、架构设计、详细模块设计"},
+    "tasks": {"role": "任务拆解", "desc": "INVEST 任务拆解、服务归属、任务环编排"},
+    "coding": {"role": "开发实现", "desc": "代码开发、单元测试、编译运行验证"},
+    "testing": {"role": "测试验证", "desc": "单元/接口/e2e 测试、缺陷报告"},
+}
+
+# 成本单价（元 / 百万 tokens），可按模型调整。
+_COST_RATES = {"uncachedInput": 1.0, "cacheRead": 0.1, "output": 2.0}
+
+
+def _stage_knowledge(stage_id: str) -> list[str]:
+    """该阶段数字员工可访问的知识库（= 该阶段标准文件，经 MCP 提供）。"""
+    for row in standards_store.list_stages():
+        if row["stage"] == stage_id:
+            return row["files"]
+    return []
+
+
+@app.get("/agents")
+async def agents() -> dict[str, Any]:
+    """数字员工列表：5 个阶段 agent，每个带职责与可访问知识库。"""
+    result = []
+    for s in STAGES:
+        sid = s["id"]
+        result.append({
+            "id": sid,
+            "name": s["name"],
+            "preset": s["preset"],
+            "role": _AGENT_META.get(sid, {}).get("role", ""),
+            "desc": _AGENT_META.get(sid, {}).get("desc", ""),
+            "knowledge": _stage_knowledge(sid),
+        })
+    return {"agents": result}
+
+
+@app.get("/agents/cost")
+async def agents_cost() -> dict[str, Any]:
+    """成本统计：遍历 harness 会话，按数字员工（preset）聚合 token 用量与成本。"""
+    sessions = await client.list_sessions()
+    agg: dict[str, dict[str, Any]] = {}
+    for it in sessions:
+        preset = it.get("agentPreset")
+        if preset not in _STAGE_IDS:
+            continue
+        tu = (it.get("projections") or {}).get("values", {}).get("tokenUsage", {}) or {}
+        uncached = int(tu.get("uncachedInputTokens", 0) or 0)
+        cache = int(tu.get("cacheReadTokens", 0) or 0)
+        output = int(tu.get("outputTokens", 0) or 0)
+        a = agg.setdefault(preset, {"sessions": 0, "uncachedInput": 0, "cacheRead": 0, "output": 0, "cost": 0.0})
+        a["sessions"] += 1
+        a["uncachedInput"] += uncached
+        a["cacheRead"] += cache
+        a["output"] += output
+        a["cost"] += (uncached * _COST_RATES["uncachedInput"] + cache * _COST_RATES["cacheRead"] + output * _COST_RATES["output"]) / 1_000_000
+    result = []
+    total = 0.0
+    total_tokens = 0
+    for s in STAGES:
+        a = agg.get(s["id"], {"sessions": 0, "uncachedInput": 0, "cacheRead": 0, "output": 0, "cost": 0.0})
+        total += a["cost"]
+        total_tokens += a["uncachedInput"] + a["cacheRead"] + a["output"]
+        result.append({
+            "id": s["id"],
+            "name": s["name"],
+            "sessions": a["sessions"],
+            "inputTokens": a["uncachedInput"] + a["cacheRead"],
+            "outputTokens": a["output"],
+            "cost": round(a["cost"], 2),
+        })
+    return {"agents": result, "totalCost": round(total, 2), "totalTokens": total_tokens}
+
+
 if __name__ == "__main__":
     import uvicorn
 
