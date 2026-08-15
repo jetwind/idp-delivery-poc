@@ -234,24 +234,28 @@ export default function AgentsCenter() {
             <p className="mt-3 text-[11px] text-slate-400">由 harness session 实时聚合（数字员工 + 任务标题 + token/成本）。</p>
           </TabsContent>
 
-          {/* 审计日志（真实：审批事件） */}
+          {/* 审计日志（真实：审批事件 + 人工 gate 确认） */}
           <TabsContent value="audit" className="mt-4">
             <T>
               <thead><tr><th className={thCls}>时间</th><th className={thCls}>数字员工</th><th className={thCls}>事件</th><th className={thCls}>结果</th></tr></thead>
               <tbody>
                 {audits.length === 0 ? (
-                  <tr><td colSpan={4} className={cn(tdCls, 'text-center text-slate-400')}>暂无审批记录（当数字员工请求执行危险命令时自动记录）</td></tr>
-                ) : audits.map(a => (
-                  <tr key={a.id} className="hover:bg-slate-50/70">
-                    <td className={tdCls}><span className="font-mono text-xs text-slate-400">{new Date(a.ts).toLocaleString('zh-CN')}</span></td>
-                    <td className={tdCls}><span className="text-xs font-medium text-slate-700">{a.agent}</span></td>
-                    <td className={tdCls}><span className="text-xs text-slate-600 leading-5">{a.detail}</span></td>
-                    <td className={tdCls}><Pill tone={a.outcome === 'allowed-once' ? 'green' : 'red'} dot>{a.outcome === 'allowed-once' ? '已批准' : '已拒绝'}</Pill></td>
-                  </tr>
-                ))}
+                  <tr><td colSpan={4} className={cn(tdCls, 'text-center text-slate-400')}>暂无记录（危险命令审批 / 人工 gate 确认时会自动记录）</td></tr>
+                ) : audits.map(a => {
+                  const tone = a.outcome === 'approve' ? 'green' : a.outcome === 'revise' ? 'amber' : a.outcome === 'allowed-once' ? 'green' : 'red'
+                  const label = a.outcome === 'approve' ? '通过' : a.outcome === 'revise' ? '退回' : a.outcome === 'allowed-once' ? '已批准' : '已拒绝'
+                  return (
+                    <tr key={a.id} className="hover:bg-slate-50/70">
+                      <td className={tdCls}><span className="font-mono text-xs text-slate-400">{new Date(a.ts).toLocaleString('zh-CN')}</span></td>
+                      <td className={tdCls}><span className="text-xs font-medium text-slate-700">{a.agent}</span></td>
+                      <td className={tdCls}><span className="text-xs text-slate-600 leading-5">{a.detail}</span></td>
+                      <td className={tdCls}><Pill tone={tone} dot>{label}</Pill></td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </T>
-            <p className="mt-3 text-[11px] text-slate-400">审批审计：危险命令的申请与批准/拒绝，落盘 SQLite，供追溯。</p>
+            <p className="mt-3 text-[11px] text-slate-400">审计：危险命令的申请与批准/拒绝，以及每阶段人工 gate 的通过/退回（含轮次与补充意见），落盘 SQLite 供追溯。</p>
           </TabsContent>
         </Tabs>
       </div>

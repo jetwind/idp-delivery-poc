@@ -60,6 +60,22 @@ def record_approval(session_id: str, agent: str, tool_name: str, reason: str, ou
         conn.close()
 
 
+def record_gate(session_id: str, agent: str, action: str, feedback: str, round_no: int) -> None:
+    """记录一次人工 gate 确认：action=approve/revise，feedback 为补充意见，round_no 为轮次。"""
+    label = "通过" if action == "approve" else "退回"
+    fb = feedback if feedback else ("无补充意见" if action == "revise" else "")
+    detail = f"第{round_no}轮人工确认：{label}" + (f"——{fb}" if fb else "")
+    conn = _conn()
+    try:
+        conn.execute(
+            "INSERT INTO activity(session_id, agent, ts, kind, detail, outcome) VALUES(?,?,?,?,?,?)",
+            (session_id, agent, int(time.time() * 1000), "gate", detail, action),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def list_activity(kind: str | None = None, limit: int = 100) -> list[dict]:
     conn = _conn()
     try:

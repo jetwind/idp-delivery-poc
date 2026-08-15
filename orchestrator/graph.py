@@ -46,6 +46,7 @@ class FlowState(TypedDict, total=False):
     validation_status: str
     gate_action: str
     gate_feedback: str
+    gate_round: int
 
 
 STAGES: list[dict[str, Any]] = [
@@ -314,7 +315,9 @@ async def poll_stage(state: FlowState, client: HarnessClient) -> FlowState:
         out_files.append(json_out)
     state.setdefault("artifacts", {})[stage["id"]] = out_files
     if not state.get("stage_committed"):
-        await git_commit(state["cwd"], f"delivery: {stage['name']} 阶段产物")
+        round_no = state.get("gate_round", 0)
+        msg = f"delivery: {stage['name']} 阶段产物" + (f"（第{round_no}轮修订）" if round_no else "")
+        await git_commit(state["cwd"], msg)
         state["stage_committed"] = True
     return state
 
@@ -489,7 +492,10 @@ async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
     elif decision == "approve":
         action = "approve"
 
+    round_no = state.get("gate_round", 0) + 1
+
     if action == "approve":
+        activity_store.record_gate(state.get("current_session_id") or "", stage["name"], "approve", "", round_no)
         return {
             **state,
             "stage_index": state["stage_index"] + 1,
@@ -498,19 +504,27 @@ async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
             "stage_committed": False,
             "gate_action": "",
             "gate_feedback": "",
+            "gate_round": 0,
         }
 
-    # 退回：保留 session 上下文，把人工补充意见回喂给 agent 修正后重新校验。
+    # 退回：保留 session 上下文，在当前版本上增量修订（不重做、不重新澄清）。
     state["gate_action"] = "revise" if state.get("current_session_id") else ""
     state["gate_feedback"] = feedback
+    state["gate_round"] = round_no
     state["stage_done"] = False
     state["stage_committed"] = False
     state["validation_status"] = "pending"
     state["validation_attempts"] = 0
+    activity_store.record_gate(state.get("current_session_id") or "", stage["name"], "revise", feedback, round_no)
     if state.get("current_session_id"):
+        out_json = schema_store.STAGE_OUTPUT_JSON.get(stage["id"], "")
+        md_files = "、".join(stage.get("output_files", []))
         prompt = (
-            "【人工退回反馈】上一版产物未获通过，请据此修正后重新产出（包括结构化 JSON 文件）：\n"
-            f"{feedback or '（无具体反馈，请重新审视并改进产物质量）'}"
+            f"【人工退回反馈 · 第{round_no}轮】上一版产物未获通过。\n"
+            f"补充意见：{feedback or '（无具体反馈，请重新审视并改进）'}\n\n"
+            f"请在【当前版本基础上增量修订】，不要重做、不要重新澄清已确认的问题："
+            f"先读取现有产物（{out_json}" + (f" 与 {md_files}" if md_files else "") + "），"
+            f"只改反馈涉及的部分，其余已确认内容保持不变；改完更新对应文件后交回。"
         )
         await client.prompt(state["current_session_id"], prompt)
     return state

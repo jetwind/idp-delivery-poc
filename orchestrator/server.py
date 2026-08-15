@@ -778,8 +778,8 @@ async def agents_activity(limit: int = 50) -> dict[str, Any]:
 
 @app.get("/agents/audit")
 async def agents_audit(limit: int = 100) -> dict[str, Any]:
-    """审计日志：审批事件（危险命令 approval）记录。"""
-    return {"audits": activity_store.list_activity(kind="approval", limit=limit)}
+    """审计日志：审批事件（危险命令 approval）+ 人工 gate 确认（approve/revise）记录。"""
+    return {"audits": activity_store.list_activity(kind=None, limit=limit)}
 
 
 # ---- 数字员工模型配置（模型 + 思考深度）----
