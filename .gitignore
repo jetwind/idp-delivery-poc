@@ -38,3 +38,8 @@ Thumbs.db
 
 # 标准集中存储数据库（运行时数据，种子在 standards/*.md）
 standards.db
+
+# 图 checkpoint 持久化数据库（重启后流程状态，运行时数据）
+checkpoints.db
+checkpoints.db-wal
+checkpoints.db-shm

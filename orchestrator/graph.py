@@ -23,7 +23,6 @@ import subprocess
 import time
 from typing import Any, TypedDict
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
 
@@ -486,7 +485,7 @@ def gate_node(state: FlowState) -> FlowState:
     return {**state, "current_session_id": None, "stage_done": False, "stage_committed": False}
 
 
-def build_graph(client: HarnessClient):
+def build_graph(client: HarnessClient, checkpointer):
     async def start(state: FlowState) -> FlowState:
         return await start_stage(state, client)
 
@@ -540,4 +539,4 @@ def build_graph(client: HarnessClient):
         return "start"
 
     g.add_conditional_edges("gate", route_gate, {"done": END, "start": "start"})
-    return g.compile(checkpointer=MemorySaver())
+    return g.compile(checkpointer=checkpointer)

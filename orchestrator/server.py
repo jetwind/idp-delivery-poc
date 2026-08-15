@@ -16,12 +16,14 @@ import json
 import os
 import subprocess
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from graph import STAGES, build_graph
@@ -32,15 +34,30 @@ import activity_store
 import config_store
 import schema_store
 
-app = FastAPI(title="delivery-orchestrator")
+# 交付文件夹根目录（orchestrator/ 的上一级），git URL clone 到这里下的 projects/。
+DELIVERY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 图 checkpoint 持久化（SQLite）：重启后流程状态不丢失。
+CHECKPOINT_DB_PATH = os.path.join(DELIVERY_ROOT, "checkpoints.db")
+
+client = HarnessClient()
+graph: Any = None  # 在 lifespan 里用 AsyncSqliteSaver 构建
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global graph
+    async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB_PATH) as saver:
+        graph = build_graph(client, saver)
+        yield
+
+
+app = FastAPI(title="delivery-orchestrator", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-client = HarnessClient()
-graph = build_graph(client)
 
 # 后台图执行任务（thread_id → asyncio.Task）+ 图运行错误（thread_id → str）。
 _flow_tasks: dict[str, asyncio.Task] = {}
@@ -55,9 +72,8 @@ async def _run_flow(thread_id: str, input_: Any, config: dict[str, Any]) -> None
         _flow_errors[thread_id] = str(exc)
 
 
-# 交付文件夹根目录（orchestrator/ 的上一级），git URL clone 到这里下的 projects/。
-DELIVERY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _GIT_URL_PREFIXES = ("http://", "https://", "git@", "ssh://", "git://")
+
 
 # 标准集中存储：SQLite（首次启动从 standards/*.md 导入种子，之后以 DB 为准）。
 standards_store.init_db(os.path.join(DELIVERY_ROOT, "standards"))

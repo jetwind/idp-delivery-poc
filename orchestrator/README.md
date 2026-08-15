@@ -57,6 +57,7 @@ harness 执行层 (3086, dsh web)
 3. **question 检测用短连接读 mux**：`peek_pending` 每次连一次 `events.mux`，读该 session 的 pending 帧。
 4. **MCP serverName 全局唯一**：mcp-client 按 `ctx.root` 全局去重，各 preset 的 standards 连接用 `standards-<stage>` 唯一命名，否则同名冲突。
 5. **前端连编排层用 `127.0.0.1` 而非 `localhost`**：IPv6 `::1`→IPv4 回退导致每请求 3~5s 延迟。
+6. **checkpoint 用 SQLite 持久化**：`AsyncSqliteSaver` 落在 `<交付根>/checkpoints.db`（gitignored），编排层重启后停在 interrupt（question/approval/gate）的流程仍可 `resume`。
 
 ## 依赖与启动
 
