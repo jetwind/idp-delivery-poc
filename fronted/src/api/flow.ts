@@ -303,12 +303,15 @@ export interface AgentModelConfig {
   reasoningEffort: string
   permission?: string | null
   maxRetries?: number | null
+  knowledgeStages?: string[] | null
 }
 
 export interface AgentConfigRow {
   id: string
   name: string
   config: AgentModelConfig | null
+  /** 该员工可访问的知识库「类」（阶段 id 列表）。 */
+  knowledgeStages: string[]
 }
 
 /** 可用模型目录（flash/pro + 思考深度）。 */
@@ -332,6 +335,7 @@ export async function getAgentConfigs(): Promise<{ configs: AgentConfigRow[] }> 
             maxRetries: c.config.maxRetries ?? null,
           }
         : null,
+      knowledgeStages: c.knowledgeStages ?? [],
     })),
   }
 }
@@ -346,6 +350,7 @@ export function setAgentConfig(stage: string, cfg: AgentModelConfig): Promise<{ 
       reasoningEffort: cfg.reasoningEffort,
       permission: cfg.permission ?? null,
       maxRetries: cfg.maxRetries ?? null,
+      knowledgeStages: cfg.knowledgeStages ?? null,
     }),
   })
 }

@@ -98,7 +98,7 @@ def delete(stage: str, name: str) -> bool:
         conn.close()
 
 
-def search(keyword: str) -> list[str]:
+def search(keyword: str, allowed_stages: list[str] | None = None) -> list[str]:
     conn = _conn()
     try:
         rows = conn.execute(
@@ -107,6 +107,8 @@ def search(keyword: str) -> list[str]:
         hits = []
         low = keyword.lower()
         for r in rows:
+            if allowed_stages is not None and r["stage"] not in allowed_stages:
+                continue
             if low in r["content"].lower():
                 matched = [ln.strip() for ln in r["content"].splitlines() if low in ln.lower()]
                 hits.append(f"{r['stage']}/{r['name']}: " + " | ".join(matched[:3]))

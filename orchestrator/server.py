@@ -580,10 +580,23 @@ _MCP_TOOLS = [
 ]
 
 
-def _mcp_list_stage_standards(args: dict) -> dict:
+def _caller_allowed_stages(caller: str | None) -> list[str]:
+    """调用者（数字员工）可访问的知识库「类」；未知 caller 默认放行全部（兼容未带 header 的旧 preset）。"""
+    if caller in _STAGE_IDS:
+        return config_store.get_knowledge_stages(caller)
+    return _STAGE_IDS
+
+
+def _mcp_denied(stage: str) -> dict:
+    return {"content": [{"type": "text", "text": f"无权访问知识库类：{stage}"}], "isError": True}
+
+
+def _mcp_list_stage_standards(args: dict, caller: str | None) -> dict:
     stage = args.get("stage", "")
     if stage not in _STAGE_IDS:
         return {"content": [{"type": "text", "text": f"未知阶段：{stage}。可用：{', '.join(_STAGE_IDS)}"}], "isError": True}
+    if stage not in _caller_allowed_stages(caller):
+        return _mcp_denied(stage)
     items = standards_store.get_all(stage)
     if not items:
         return {"content": [{"type": "text", "text": f"阶段 {stage} 暂无标准。"}]}
@@ -591,28 +604,30 @@ def _mcp_list_stage_standards(args: dict) -> dict:
     return {"content": [{"type": "text", "text": text}]}
 
 
-def _mcp_get_standard(args: dict) -> dict:
+def _mcp_get_standard(args: dict, caller: str | None) -> dict:
     stage = args.get("stage", "")
     sid = args.get("standard_id", "")
     if stage not in _STAGE_IDS:
         return {"content": [{"type": "text", "text": f"未知阶段：{stage}"}], "isError": True}
+    if stage not in _caller_allowed_stages(caller):
+        return _mcp_denied(stage)
     content = standards_store.read(stage, sid)
     if content is None:
         return {"content": [{"type": "text", "text": f"标准不存在：{stage}/{sid}"}], "isError": True}
     return {"content": [{"type": "text", "text": content}]}
 
 
-def _mcp_search_standards(args: dict) -> dict:
+def _mcp_search_standards(args: dict, caller: str | None) -> dict:
     kw = args.get("keyword", "")
     if not kw:
         return {"content": [{"type": "text", "text": "keyword 不能为空"}], "isError": True}
-    hits = standards_store.search(kw)
+    hits = standards_store.search(kw, allowed_stages=_caller_allowed_stages(caller))
     if not hits:
         return {"content": [{"type": "text", "text": f"未找到包含「{kw}」的标准。"}]}
     return {"content": [{"type": "text", "text": "命中：\n" + "\n".join(hits[:20])}]}
 
 
-def _handle_mcp(method, params, msg_id):
+def _handle_mcp(method, params, msg_id, caller):
     if method == "initialize":
         pv = (params or {}).get("protocolVersion", "2025-06-18")
         return {"jsonrpc": "2.0", "id": msg_id, "result": {
@@ -629,11 +644,11 @@ def _handle_mcp(method, params, msg_id):
         args = (params or {}).get("arguments") or {}
         try:
             if name == "list_stage_standards":
-                result = _mcp_list_stage_standards(args)
+                result = _mcp_list_stage_standards(args, caller)
             elif name == "get_standard":
-                result = _mcp_get_standard(args)
+                result = _mcp_get_standard(args, caller)
             elif name == "search_standards":
-                result = _mcp_search_standards(args)
+                result = _mcp_search_standards(args, caller)
             else:
                 result = {"content": [{"type": "text", "text": f"未知工具：{name}"}], "isError": True}
         except Exception as exc:  # noqa: BLE001 - 工具内部错误透出为文本
@@ -650,6 +665,7 @@ async def mcp_endpoint(request: Request):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"非法 JSON：{exc}") from exc
     messages = body if isinstance(body, list) else [body]
+    caller = request.headers.get("x-dsh-agent")
     responses = []
     for msg in messages:
         if not isinstance(msg, dict):
@@ -657,7 +673,7 @@ async def mcp_endpoint(request: Request):
         msg_id = msg.get("id")
         if msg_id is None:
             continue  # 通知（notifications/initialized 等）不响应
-        resp = _handle_mcp(msg.get("method"), msg.get("params"), msg_id)
+        resp = _handle_mcp(msg.get("method"), msg.get("params"), msg_id, caller)
         if resp is not None:
             responses.append(resp)
     if not responses:
@@ -827,6 +843,7 @@ async def agents_config() -> dict[str, Any]:
                 "permission": cfg.get("permission"),
                 "maxRetries": cfg.get("max_retries"),
             } if cfg else None,
+            "knowledgeStages": config_store.get_knowledge_stages(s["id"]),
         })
     return {"configs": result}
 
@@ -837,6 +854,7 @@ class AgentConfigRequest(BaseModel):
     reasoningEffort: str
     permission: str | None = None
     maxRetries: int | None = None
+    knowledgeStages: list[str] | None = None
 
 
 @app.put("/agents/config")
@@ -850,7 +868,16 @@ async def agents_set_config(stage: str, req: AgentConfigRequest) -> dict[str, An
             status_code=400,
             detail=f"非法重试次数：{req.maxRetries}，须为 0~{config_store.MAX_RETRIES_CAP} 的整数",
         )
-    config_store.set_config(stage, req.provider, req.model, req.reasoningEffort, req.permission, req.maxRetries)
+    if req.knowledgeStages is not None:
+        bad = [s for s in req.knowledgeStages if s not in config_store.KNOWLEDGE_STAGES]
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail=f"非法知识库类：{', '.join(bad)}，可用：{', '.join(config_store.KNOWLEDGE_STAGES)}",
+            )
+    config_store.set_config(
+        stage, req.provider, req.model, req.reasoningEffort, req.permission, req.maxRetries, req.knowledgeStages,
+    )
     return {"stage": stage, "ok": True}
 
 

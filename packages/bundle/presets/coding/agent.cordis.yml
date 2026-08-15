@@ -78,5 +78,5 @@
     serverName: standards-coding
     transport: streamable-http
     url: http://127.0.0.1:3087/mcp
-    headers: {}
+    headers: { "x-dsh-agent": "coding" }
     failOnStartupError: false

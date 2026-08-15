@@ -37,5 +37,5 @@
     serverName: standards-design
     transport: streamable-http
     url: http://127.0.0.1:3087/mcp
-    headers: {}
+    headers: { "x-dsh-agent": "design" }
     failOnStartupError: false

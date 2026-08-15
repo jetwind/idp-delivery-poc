@@ -23,6 +23,14 @@ const agentTools: Record<string, string[]> = {
   testing: ['测试执行', '文档解析', '知识库检索（MCP）'],
 }
 
+const knowledgeStageOptions = [
+  { id: 'requirements', label: '需求' },
+  { id: 'design', label: '设计' },
+  { id: 'tasks', label: '任务' },
+  { id: 'coding', label: '编码' },
+  { id: 'testing', label: '测试' },
+]
+
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
@@ -42,6 +50,7 @@ export default function AgentsCenter() {
   const [editEffort, setEditEffort] = useState('')
   const [editPerm, setEditPerm] = useState('workspace-write')
   const [editRetries, setEditRetries] = useState(2)
+  const [editKnowledge, setEditKnowledge] = useState<string[]>([])
 
   useEffect(() => {
     let alive = true
@@ -55,6 +64,7 @@ export default function AgentsCenter() {
   const costOf = (id: string) => cost?.agents.find(a => a.id === id)
   const maxCost = Math.max(1, ...(cost?.agents.map(a => a.cost) ?? [1]))
   const configOf = (id: string) => configs.find(c => c.id === id)?.config
+  const knowledgeOf = (id: string) => configs.find(c => c.id === id)?.knowledgeStages ?? [id]
 
   function openPerm(a: DigitalAgent) {
     const cfg = configOf(a.id)
@@ -63,6 +73,7 @@ export default function AgentsCenter() {
     setEditEffort(cfg?.reasoningEffort ?? (models.find(m => m.model === (cfg?.model ?? models[0]?.model))?.defaultEffort ?? ''))
     setEditPerm(cfg?.permission ?? 'workspace-write')
     setEditRetries(cfg?.maxRetries ?? 2)
+    setEditKnowledge(knowledgeOf(a.id))
   }
 
   async function saveModel() {
@@ -70,7 +81,7 @@ export default function AgentsCenter() {
     const m = models.find(x => x.model === editModel)
     const provider = m?.provider ?? 'deepseek-official'
     try {
-      await setAgentConfig(permAgent.id, { provider, model: editModel, reasoningEffort: editEffort, permission: editPerm, maxRetries: editRetries })
+      await setAgentConfig(permAgent.id, { provider, model: editModel, reasoningEffort: editEffort, permission: editPerm, maxRetries: editRetries, knowledgeStages: editKnowledge })
       const cf = await getAgentConfigs()
       setConfigs(cf.configs)
       setPermAgent(null)
@@ -284,11 +295,25 @@ export default function AgentsCenter() {
                   </div>
                 </div>
                 <div>
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2"><BookOpen className="w-3.5 h-3.5 text-cyan-500" />可访问知识库（MCP 标准）</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {permAgent.knowledge.length ? permAgent.knowledge.map(k => <Pill key={k} tone="cyan">{k}</Pill>) : <span className="text-xs text-slate-400">暂无标准文件</span>}
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2"><BookOpen className="w-3.5 h-3.5 text-cyan-500" />可访问知识库（按类配置）</div>
+                  <div className="space-y-1.5">
+                    {knowledgeStageOptions.map(opt => {
+                      const checked = editKnowledge.includes(opt.id)
+                      return (
+                        <label key={opt.id} className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer rounded-md border border-slate-100 px-3 py-2 hover:bg-slate-50">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setEditKnowledge(prev => checked ? prev.filter(x => x !== opt.id) : [...prev, opt.id])}
+                            className="accent-indigo-600"
+                          />
+                          <span>{opt.label}阶段标准</span>
+                          {opt.id === permAgent.id && <Pill tone="slate" className="ml-auto">本阶段</Pill>}
+                        </label>
+                      )
+                    })}
                   </div>
-                  <p className="mt-2 text-[11px] text-slate-400">知识库经 MCP 只读查询提供，维护入口在「标准与规范」页面。</p>
+                  <p className="mt-2 text-[11px] text-slate-400">勾选该员工可检索的知识库类（按交付阶段划分），经 MCP 只读提供；未勾选则无法访问对应类。</p>
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2"><Bot className="w-3.5 h-3.5 text-violet-500" />模型与思考深度</div>
