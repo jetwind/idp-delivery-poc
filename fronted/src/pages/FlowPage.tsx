@@ -30,6 +30,7 @@ export default function FlowPage() {
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const seenRef = useRef<Set<string>>(new Set())
+  const eventsBusyRef = useRef(false)
   const logRef = useRef<HTMLDivElement | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -38,14 +39,22 @@ export default function FlowPage() {
 
   useEffect(() => () => stopPolling(), [stopPolling])
 
-  // 启动后轮询状态 + 实时日志。
+  // 启动后轮询：状态单独拉（快，pending 立即生效）；日志单独异步更新（慢也不阻塞状态）。
   useEffect(() => {
     if (!threadId) return
-    const tick = async () => {
+    const tickState = async () => {
       try {
-        const [snap, ev] = await Promise.all([getFlowState(threadId), getFlowEvents(threadId)])
+        const snap = await getFlowState(threadId)
         setSnapshot(snap)
         if (snap.error) setError(snap.error)
+        if (snap.done && snap.pending === null) stopPolling()
+      } catch { /* 单次轮询失败不断流 */ }
+    }
+    const tickEvents = async () => {
+      if (eventsBusyRef.current) return // 上一次日志拉取还没回来，跳过本次，避免堆积
+      eventsBusyRef.current = true
+      try {
+        const ev = await getFlowEvents(threadId)
         setRunning(ev.running)
         const fresh = ev.events.filter(e => {
           const key = `${e.session_id ?? '?'}:${e.seq}`
@@ -54,11 +63,13 @@ export default function FlowPage() {
           return true
         })
         if (fresh.length) setLogs(prev => [...prev, ...fresh])
-        if (snap.done && snap.pending === null) stopPolling()
-      } catch { /* 单次轮询失败不断流 */ }
+      } catch { /* 单次轮询失败不断流 */ } finally {
+        eventsBusyRef.current = false
+      }
     }
-    tick()
-    timerRef.current = setInterval(tick, 2000)
+    tickState()
+    tickEvents()
+    timerRef.current = setInterval(() => { void tickState(); void tickEvents() }, 2000)
     return stopPolling
   }, [threadId, stopPolling])
 
