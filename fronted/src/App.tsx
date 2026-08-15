@@ -43,7 +43,7 @@ export default function App() {
         <Route path="/projects/p1/specs" element={<SpecList />} />
         <Route path="/projects/p1/specs/:id" element={<SpecDetail />} />
         <Route path="/projects/p1/workflow" element={<WorkflowPage />} />
-        <Route path="/projects/p1/flow" element={<FlowPage />} />
+        <Route path="/projects/:pid/flow" element={<FlowPage />} />
         <Route path="/projects/p1/tasks/:id" element={<AITaskDetail />} />
         <Route path="/projects/p1/tasks/:id/complete" element={<CompletionPage />} />
         <Route path="/projects/p1/gate" element={<GatePage />} />

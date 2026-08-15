@@ -33,6 +33,7 @@ import standards_store
 import activity_store
 import config_store
 import schema_store
+import project_store
 
 # 交付文件夹根目录（orchestrator/ 的上一级），git URL clone 到这里下的 projects/。
 DELIVERY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -83,6 +84,8 @@ activity_store.init_db()
 config_store.init_db()
 # 阶段产物 JSON Schema：SQLite（内置默认 + 可配置）。
 schema_store.init_db()
+# 交付项目（进入流水线的入口）：SQLite。
+project_store.init_db()
 
 
 def _is_git_url(value: str) -> bool:
@@ -309,12 +312,11 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
     }
 
 
-@app.post("/flow/start")
-async def start(req: StartRequest) -> dict[str, Any]:
+async def _start_flow(requirement_text: str, cwd_raw: str) -> dict[str, Any]:
     thread_id = str(uuid.uuid4())
-    cwd = _resolve_cwd(req.cwd)
+    cwd = _resolve_cwd(cwd_raw)
     initial: dict[str, Any] = {
-        "requirement_text": req.requirement_text,
+        "requirement_text": requirement_text,
         "cwd": cwd,
         "stage_index": 0,
         "artifacts": {},
@@ -322,6 +324,62 @@ async def start(req: StartRequest) -> dict[str, Any]:
     _flow_errors.pop(thread_id, None)
     _flow_tasks[thread_id] = asyncio.create_task(_run_flow(thread_id, initial, _config(thread_id)))
     return await _snapshot(thread_id)
+
+
+@app.post("/flow/start")
+async def start(req: StartRequest) -> dict[str, Any]:
+    return await _start_flow(req.requirement_text, req.cwd)
+
+
+# ---- 交付项目管理（进入流水线的入口）----
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    requirement_text: str
+    cwd: str
+
+
+@app.post("/projects")
+async def projects_create(req: ProjectCreateRequest) -> dict[str, Any]:
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="项目名称不能为空")
+    if not req.requirement_text.strip():
+        raise HTTPException(status_code=400, detail="需求描述不能为空")
+    if not req.cwd.strip():
+        raise HTTPException(status_code=400, detail="工作目录不能为空")
+    proj = project_store.create_project(req.name.strip(), req.requirement_text.strip(), req.cwd.strip())
+    return {"project": proj}
+
+
+@app.get("/projects")
+async def projects_list() -> dict[str, Any]:
+    return {"projects": project_store.list_projects()}
+
+
+@app.get("/projects/{pid}")
+async def projects_get(pid: str) -> dict[str, Any]:
+    proj = project_store.get_project(pid)
+    if proj is None:
+        raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
+    return {"project": proj}
+
+
+@app.delete("/projects/{pid}")
+async def projects_delete(pid: str) -> dict[str, Any]:
+    if not project_store.delete_project(pid):
+        raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
+    return {"id": pid, "ok": True}
+
+
+@app.post("/projects/{pid}/flow")
+async def projects_start_flow(pid: str) -> dict[str, Any]:
+    """启动（或重新开始）该项目的流水线：新建 thread，链接到项目，返回快照。"""
+    proj = project_store.get_project(pid)
+    if proj is None:
+        raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
+    snap = await _start_flow(proj["requirement_text"], proj["cwd"])
+    project_store.set_thread(pid, snap["thread_id"])
+    return snap
 
 
 @app.get("/flow/state/{thread_id}")

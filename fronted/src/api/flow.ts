@@ -376,3 +376,44 @@ export function setStageSchema(stage: string, schema: Record<string, unknown>): 
     body: JSON.stringify({ schema }),
   })
 }
+
+// ---- 交付项目管理（进入流水线的入口）----
+
+export interface Project {
+  id: string
+  name: string
+  requirement_text: string
+  cwd: string
+  thread_id: string | null
+  stage_index: number
+  created_at: number
+  updated_at: number
+}
+
+/** 项目列表。 */
+export function getProjects(): Promise<{ projects: Project[] }> {
+  return flowJson('/projects')
+}
+
+/** 单个项目详情。 */
+export function getProject(id: string): Promise<{ project: Project }> {
+  return flowJson(`/projects/${encodeURIComponent(id)}`)
+}
+
+/** 新建项目（名称 + 原始需求 + 工作目录）。 */
+export function createProject(name: string, requirementText: string, cwd: string): Promise<{ project: Project }> {
+  return flowJson('/projects', {
+    method: 'POST',
+    body: JSON.stringify({ name, requirement_text: requirementText, cwd }),
+  })
+}
+
+/** 删除项目。 */
+export function deleteProject(id: string): Promise<{ ok: boolean }> {
+  return flowJson(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** 启动/重新开始该项目的流水线，返回首个快照（并把 thread 链接到项目）。 */
+export function startProjectFlow(id: string): Promise<FlowSnapshot> {
+  return flowJson(`/projects/${encodeURIComponent(id)}/flow`, { method: 'POST' })
+}
