@@ -29,6 +29,7 @@ export default function FlowPage() {
   const [error, setError] = useState<string | null>(null)
   const [answers, setAnswers] = useState<Record<string, string[]>>({})
   const [customs, setCustoms] = useState<Record<string, string>>({})
+  const [gateFeedback, setGateFeedback] = useState('')
   const [logs, setLogs] = useState<FlowEvent[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [running, setRunning] = useState(false)
@@ -143,11 +144,13 @@ export default function FlowPage() {
     }
   }
 
-  async function submitGate(decision: 'approve' | 'reject') {
+  async function submitGate(decision: 'approve' | 'revise') {
     setBusy(true); setError(null)
     try {
-      await resumeFlow(threadId!, decision)
+      const answer = decision === 'approve' ? 'approve' : { action: 'revise', feedback: gateFeedback.trim() }
+      await resumeFlow(threadId!, answer)
       setSnapshot(s => s ? { ...s, pending: null } : s)
+      setGateFeedback('')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -393,14 +396,21 @@ export default function FlowPage() {
                 <ShieldCheck className="w-4 h-4 text-violet-500" />
                 <span className="text-[13px] font-semibold text-slate-800">「{pending.stage}」阶段已完成，等待人工确认</span>
               </div>
-              <p className="text-xs text-slate-500 mb-4">确认通过则进入下一阶段；退回则本阶段重新执行。</p>
+              <p className="text-xs text-slate-500 mb-3">确认通过进入下一阶段；不通过时填写补充意见，agent 会据此修正后再次提交，可反复直到满足要求。</p>
+              <Textarea
+                rows={3}
+                value={gateFeedback}
+                onChange={e => setGateFeedback(e.target.value)}
+                placeholder="补充修改意见（可选），例如：需求里缺少性能指标、字段命名改为 xxx、补充异常场景…"
+                className="mb-3 text-xs"
+              />
               <div className="flex gap-2">
                 <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => submitGate('approve')}>
                   {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
                   确认通过
                 </Button>
-                <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50" disabled={busy} onClick={() => submitGate('reject')}>
-                  <XCircle className="w-3.5 h-3.5 mr-1" />退回
+                <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50" disabled={busy} onClick={() => submitGate('revise')}>
+                  <XCircle className="w-3.5 h-3.5 mr-1" />退回重做（含补充意见）
                 </Button>
               </div>
             </div>

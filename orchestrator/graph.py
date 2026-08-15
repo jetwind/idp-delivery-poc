@@ -44,6 +44,8 @@ class FlowState(TypedDict, total=False):
     validation_attempts: int
     validation_error: str | None
     validation_status: str
+    gate_action: str
+    gate_feedback: str
 
 
 STAGES: list[dict[str, Any]] = [
@@ -476,18 +478,42 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
     return state
 
 
-def gate_node(state: FlowState) -> FlowState:
+async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
     stage = STAGES[state["stage_index"]]
     decision = interrupt({"type": "gate", "stage": stage["name"]})
-    if decision == "approve":
+    action = "reject"
+    feedback = ""
+    if isinstance(decision, dict):
+        action = decision.get("action") or "reject"
+        feedback = str(decision.get("feedback") or "").strip()
+    elif decision == "approve":
+        action = "approve"
+
+    if action == "approve":
         return {
             **state,
             "stage_index": state["stage_index"] + 1,
             "current_session_id": None,
             "stage_done": False,
             "stage_committed": False,
+            "gate_action": "",
+            "gate_feedback": "",
         }
-    return {**state, "current_session_id": None, "stage_done": False, "stage_committed": False}
+
+    # 退回：保留 session 上下文，把人工补充意见回喂给 agent 修正后重新校验。
+    state["gate_action"] = "revise" if state.get("current_session_id") else ""
+    state["gate_feedback"] = feedback
+    state["stage_done"] = False
+    state["stage_committed"] = False
+    state["validation_status"] = "pending"
+    state["validation_attempts"] = 0
+    if state.get("current_session_id"):
+        prompt = (
+            "【人工退回反馈】上一版产物未获通过，请据此修正后重新产出（包括结构化 JSON 文件）：\n"
+            f"{feedback or '（无具体反馈，请重新审视并改进产物质量）'}"
+        )
+        await client.prompt(state["current_session_id"], prompt)
+    return state
 
 
 def build_graph(client: HarnessClient, checkpointer):
@@ -506,13 +532,16 @@ def build_graph(client: HarnessClient, checkpointer):
     async def validate(state: FlowState) -> FlowState:
         return await validate_node(state, client)
 
+    async def gate(state: FlowState) -> FlowState:
+        return await gate_node(state, client)
+
     g = StateGraph(FlowState)
     g.add_node("start", start)
     g.add_node("poll", poll)
     g.add_node("question", question)
     g.add_node("approval", approval)
     g.add_node("validate", validate)
-    g.add_node("gate", gate_node)
+    g.add_node("gate", gate)
 
     g.add_edge(START, "start")
     g.add_edge("start", "poll")
@@ -541,7 +570,9 @@ def build_graph(client: HarnessClient, checkpointer):
     def route_gate(state: FlowState) -> str:
         if state["stage_index"] >= len(STAGES):
             return "done"
+        if state.get("gate_action") == "revise":
+            return "poll"
         return "start"
 
-    g.add_conditional_edges("gate", route_gate, {"done": END, "start": "start"})
+    g.add_conditional_edges("gate", route_gate, {"done": END, "start": "start", "poll": "poll"})
     return g.compile(checkpointer=checkpointer)
