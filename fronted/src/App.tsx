@@ -23,8 +23,8 @@ export default function App() {
         <Route path="/cockpit" element={<AICockpit />} />
         <Route path="/agents" element={<AgentsCenter />} />
         <Route path="/knowledge" element={<KnowledgeCenter />} />
+        <Route path="/knowledge/standards" element={<StandardsManagePage />} />
         <Route path="/metrics" element={<MetricsCenter />} />
-        <Route path="/standards" element={<StandardsManagePage />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>
     </AppLayout>

@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  LayoutGrid, FolderPlus, Workflow, Gauge, Radar, Bot, BookOpen, FileStack,
+  LayoutGrid, FolderPlus, Workflow, Gauge, Radar, Bot, BookOpen,
   Search, ChevronDown, Hexagon, CircleUser, Check,
 } from 'lucide-react'
 
@@ -44,7 +44,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       items: [
         { to: '/agents', label: '数字员工', icon: Bot },
         { to: '/knowledge', label: '知识库', icon: BookOpen },
-        { to: '/standards', label: '标准与规范', icon: FileStack },
       ],
     },
   ]
@@ -160,8 +159,9 @@ function crumbMap(path: string, projectName?: string): string {
   if (/^\/projects\/new/.test(path)) return '新增项目'
   if (/^\/projects\/[^/]+\/flow/.test(path)) return `${projectName ?? '项目'} · AI 流水线`
   if (/^\/projects$/.test(path)) return '项目列表'
+  if (/^\/knowledge\/standards/.test(path)) return '知识库 · 工程标准'
   const map: [RegExp, string][] = [
-    [/^\/cockpit/, 'AI 驾驶舱'], [/^\/agents/, '数字员工中心'], [/^\/knowledge/, '知识库管理'], [/^\/metrics/, '度量中心'], [/^\/standards/, '标准与规范'],
+    [/^\/cockpit/, 'AI 驾驶舱'], [/^\/agents/, '数字员工中心'], [/^\/knowledge/, '知识库管理'], [/^\/metrics/, '度量中心'],
   ]
   for (const [re, label] of map) if (re.test(path)) return label
   return 'AI 交付'
