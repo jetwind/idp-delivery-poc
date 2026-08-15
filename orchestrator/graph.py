@@ -117,7 +117,7 @@ STAGES: list[dict[str, Any]] = [
             "实现要求：\n"
             "1. 按任务环顺序推进；同一环内互不依赖的任务用 subagent 并行委派，或用 workflow 编排多代理流程。\n"
             "2. 每个任务实现后写单元测试，并实际运行验证（编译通过、测试通过、应用可启动）。\n"
-            "3. 后端放 services/ 下（Spring Boot，Java 21），前端放 frontend/ 下（Vue）。\n"
+            "3. 后端放 services/ 下（默认 Spring Boot，Java 21）、前端放 frontend/ 下（默认 Vue）；需求或设计另有指定技术栈则遵循。\n"
             "4. 优先复用现有模式，小步提交，不越过本阶段范围改需求或做发布决策。\n\n"
             "实现说明用 write 工具写入 specs/implementation.md，模板固定为：\n"
             "# 实现说明\n## 1. 每个任务的改动点与验证方式\n## 2. 服务/模块清单（新建/升级 + 目录位置）\n"
@@ -309,12 +309,67 @@ async def approval_node(state: FlowState, client: HarnessClient) -> FlowState:
 
 
 MAX_VALIDATION_ATTEMPTS = 2
+COMMAND_TIMEOUT_SECONDS = 600
+
+
+def _run_command(cwd: str, cmd: str, label: str) -> str | None:
+    """在 cwd 下运行一条命令，返回错误描述；退出码 0 返回 None。"""
+    try:
+        proc = subprocess.run(
+            cmd, cwd=cwd, shell=True, capture_output=True, timeout=COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return f"{label}命令超时（>{COMMAND_TIMEOUT_SECONDS}s）：{cmd}"
+    except Exception as exc:  # noqa: BLE001 - 命令执行异常按验收失败处理
+        return f"{label}命令执行异常：{exc}"
+    if proc.returncode == 0:
+        return None
+    out = (proc.stdout or b"").decode("utf-8", "replace").strip()
+    err = (proc.stderr or b"").decode("utf-8", "replace").strip()
+    tail = (err or out)[-2000:]
+    return f"{label}命令退出码非 0（{proc.returncode}）：{cmd}\n输出尾部：\n{tail}"
+
+
+def run_command_acceptance(stage_id: str, cwd: str, instance: dict[str, Any]) -> list[str]:
+    """铁律 3：04/05 的「完成」由真实命令退出码判定，不信 agent 自报。
+
+    - coding：运行 buildCommand + testCommand，任一退出码非 0 = 失败。
+    - testing：运行 unitTest.command，退出码非 0 = 失败；且报告 failed 必须为 0。
+    返回错误列表（空 = 通过）。
+    """
+    errors: list[str] = []
+    if stage_id == "coding":
+        for key, label in (("buildCommand", "构建"), ("testCommand", "单元测试")):
+            cmd = instance.get(key)
+            if not isinstance(cmd, str) or not cmd.strip():
+                errors.append(f"{label}命令（{key}）为空")
+                continue
+            err = _run_command(cwd, cmd.strip(), label)
+            if err:
+                errors.append(err)
+    elif stage_id == "testing":
+        unit = instance.get("unitTest")
+        if not isinstance(unit, dict):
+            errors.append("unitTest 字段缺失或非法")
+        else:
+            cmd = unit.get("command")
+            if not isinstance(cmd, str) or not cmd.strip():
+                errors.append("单元测试命令（unitTest.command）为空")
+            else:
+                err = _run_command(cwd, cmd.strip(), "单元测试")
+                if err:
+                    errors.append(err)
+            failed = unit.get("failed")
+            if isinstance(failed, (int, float)) and failed != 0:
+                errors.append(f"测试报告声明 failed={failed}，但确定性验收要求 0 失败")
+    return errors
 
 
 async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
-    """图侧确定性校验：读产物 JSON + jsonschema 校验，失败重试（限次）→ 升级人工。
+    """图侧确定性校验：读产物 JSON + jsonschema 校验；04/05 追加命令验收（取退出码）。
 
-    铁律 2/3：产物的「形状」由 jsonschema 验，「完成」由这条边判，不信 agent 自报。
+    铁律 2/3：产物的「形状」由 jsonschema 验，「完成」由这条边判（04/05 跑真实
+    build/test 命令的退出码），不信 agent 自报。失败重试（限次）→ 升级人工。
     """
     stage = STAGES[state["stage_index"]]
     stage_id = stage["id"]
@@ -327,6 +382,7 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
 
     full = os.path.join(state["cwd"], out_json)
     errors: list[str] = []
+    instance: dict[str, Any] | None = None
     if not os.path.isfile(full):
         errors = [f"产物文件不存在：{out_json}"]
     else:
@@ -340,6 +396,10 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
         else:
             errors = schema_store.validate_instance(schema, instance)
 
+    # schema 通过后，04/05 追加确定性命令验收（跑 build/test 命令取退出码）。
+    if not errors and isinstance(instance, dict):
+        errors = run_command_acceptance(stage_id, state["cwd"], instance)
+
     if not errors:
         state["validation_status"] = "passed"
         state["validation_error"] = None
@@ -352,10 +412,13 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
         # 重试：把失败原因反馈给 agent，让它修正后重新写文件。
         state["validation_status"] = "retrying"
         state["stage_done"] = False
+        # 重试期间 agent 会改产物/代码，撤销已提交标记，让修正后的文件也被 git 记录。
+        state["stage_committed"] = False
         feedback = (
-            f"你产出的结构化文件 {out_json} 未通过 schema 校验，请修正后重新用 write 写入该文件。\n"
+            f"你产出的结构化文件 {out_json} 未通过图侧确定性校验（schema 或命令验收），请修正后重试。\n"
             f"校验错误（{len(errors)} 条）：\n" + "\n".join(f"- {e}" for e in errors) + "\n"
-            f"请严格遵循给定的 JSON Schema 修正内容。"
+            f"若为命令失败，请修好代码/命令，重新运行验证并更新 {out_json} 后写回；"
+            f"若为 schema 问题，请严格遵循给定的 JSON Schema 修正内容。"
         )
         await client.prompt(state["current_session_id"], feedback)
         return state
