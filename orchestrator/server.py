@@ -27,6 +27,7 @@ from langgraph.types import Command
 from graph import STAGES, build_graph
 from harness_client import HarnessClient
 import standards_store
+import activity_store
 
 app = FastAPI(title="delivery-orchestrator")
 app.add_middleware(
@@ -57,6 +58,8 @@ _GIT_URL_PREFIXES = ("http://", "https://", "git@", "ssh://", "git://")
 
 # 标准集中存储：SQLite（首次启动从 standards/*.md 导入种子，之后以 DB 为准）。
 standards_store.init_db(os.path.join(DELIVERY_ROOT, "standards"))
+# 运行监控/审计活动记录：SQLite（与 standards 同库）。
+activity_store.init_db()
 
 
 def _is_git_url(value: str) -> bool:
@@ -616,6 +619,43 @@ async def agents_cost() -> dict[str, Any]:
             "cost": round(a["cost"], 2),
         })
     return {"agents": result, "totalCost": round(total, 2), "totalTokens": total_tokens}
+
+
+@app.get("/agents/activity")
+async def agents_activity(limit: int = 50) -> dict[str, Any]:
+    """运行监控：最近的 session 活动摘要（数字员工 + 标题 + tokens + 成本）。"""
+    sessions = await client.list_sessions()
+    name_by_id = {s["id"]: s["name"] for s in STAGES}
+    result = []
+    for it in sessions:
+        preset = it.get("agentPreset")
+        if preset not in _STAGE_IDS:
+            continue
+        tu = (it.get("projections") or {}).get("values", {}).get("tokenUsage", {}) or {}
+        title = (it.get("projections") or {}).get("values", {}).get("title") or ""
+        uncached = int(tu.get("uncachedInputTokens", 0) or 0)
+        cache = int(tu.get("cacheReadTokens", 0) or 0)
+        output = int(tu.get("outputTokens", 0) or 0)
+        tokens = uncached + cache + output
+        cost = (uncached * _COST_RATES["uncachedInput"] + cache * _COST_RATES["cacheRead"] + output * _COST_RATES["output"]) / 1_000_000
+        result.append({
+            "sessionId": it.get("sessionId"),
+            "agent": preset,
+            "agentName": name_by_id.get(preset, preset),
+            "title": title,
+            "tokens": tokens,
+            "cost": round(cost, 4),
+            "running": bool(it.get("running")),
+            "updatedAt": it.get("updatedAt"),
+        })
+    result.sort(key=lambda x: x.get("updatedAt") or 0, reverse=True)
+    return {"activities": result[:limit]}
+
+
+@app.get("/agents/audit")
+async def agents_audit(limit: int = 100) -> dict[str, Any]:
+    """审计日志：审批事件（危险命令 approval）记录。"""
+    return {"audits": activity_store.list_activity(kind="approval", limit=limit)}
 
 
 if __name__ == "__main__":

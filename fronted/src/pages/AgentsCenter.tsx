@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getAgents, getAgentsCost, type DigitalAgent, type AgentsCost } from '@/api/flow'
-import { agentRuns, auditLogs } from '@/mock/data5'
+import { getAgents, getAgentsCost, getAgentsActivity, getAgentsAudit, type DigitalAgent, type AgentsCost, type AgentActivity, type AuditRecord } from '@/api/flow'
 import { PageHeader, Pill, Bar, T, thCls, tdCls } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -33,13 +32,15 @@ function fmtTokens(n: number): string {
 export default function AgentsCenter() {
   const [agents, setAgents] = useState<DigitalAgent[]>([])
   const [cost, setCost] = useState<AgentsCost | null>(null)
+  const [activities, setActivities] = useState<AgentActivity[]>([])
+  const [audits, setAudits] = useState<AuditRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [permAgent, setPermAgent] = useState<DigitalAgent | null>(null)
 
   useEffect(() => {
     let alive = true
-    Promise.all([getAgents(), getAgentsCost()])
-      .then(([a, c]) => { if (alive) { setAgents(a.agents); setCost(c) } })
+    Promise.all([getAgents(), getAgentsCost(), getAgentsActivity(), getAgentsAudit()])
+      .then(([a, c, act, au]) => { if (alive) { setAgents(a.agents); setCost(c); setActivities(act.activities); setAudits(au.audits) } })
       .catch(() => {})
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
@@ -183,45 +184,46 @@ export default function AgentsCenter() {
             </div>
           </TabsContent>
 
-          {/* 运行监控（示例数据） */}
+          {/* 运行监控（真实） */}
           <TabsContent value="monitor" className="mt-4">
             <T>
-              <thead><tr><th className={thCls}>时间</th><th className={thCls}>数字员工</th><th className={thCls}>行为</th><th className={thCls}>对象</th><th className={thCls}>Tokens</th><th className={thCls}>成本</th><th className={thCls}>结果</th></tr></thead>
+              <thead><tr><th className={thCls}>时间</th><th className={thCls}>数字员工</th><th className={thCls}>任务</th><th className={thCls}>Tokens</th><th className={thCls}>成本</th><th className={thCls}>状态</th></tr></thead>
               <tbody>
-                {agentRuns.map(r => (
-                  <tr key={r.time + r.action} className="hover:bg-slate-50/70">
-                    <td className={tdCls}><span className="font-mono text-xs text-slate-400">{r.time}</span></td>
-                    <td className={tdCls}><span className="text-xs font-medium text-slate-700">{r.agent}</span></td>
-                    <td className={tdCls}><span className="text-xs text-slate-600">{r.action}</span></td>
-                    <td className={tdCls}><span className="font-mono text-[11px] text-slate-400">{r.target}</span></td>
-                    <td className={tdCls}><span className="font-mono text-xs text-slate-500">{r.tokens}</span></td>
-                    <td className={tdCls}><span className="font-mono text-xs text-slate-500">{r.cost > 0 ? `¥${r.cost}` : '—'}</span></td>
-                    <td className={tdCls}><Pill tone={r.result === '成功' ? 'green' : r.result === '已拦截' ? 'red' : r.result === '已暂停' ? 'amber' : 'blue'} dot>{r.result}</Pill></td>
+                {activities.length === 0 ? (
+                  <tr><td colSpan={6} className={cn(tdCls, 'text-center text-slate-400')}>暂无运行记录</td></tr>
+                ) : activities.map(a => (
+                  <tr key={a.sessionId} className="hover:bg-slate-50/70">
+                    <td className={tdCls}><span className="font-mono text-xs text-slate-400">{new Date(a.updatedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></td>
+                    <td className={tdCls}><span className="text-xs font-medium text-slate-700">{a.agentName}</span></td>
+                    <td className={tdCls}><span className="text-xs text-slate-600">{a.title || '（无标题）'}</span></td>
+                    <td className={tdCls}><span className="font-mono text-xs text-slate-500">{fmtTokens(a.tokens)}</span></td>
+                    <td className={tdCls}><span className="font-mono text-xs text-slate-500">{a.cost > 0 ? `¥${a.cost}` : '—'}</span></td>
+                    <td className={tdCls}><Pill tone={a.running ? 'blue' : 'green'} dot>{a.running ? '执行中' : '已完成'}</Pill></td>
                   </tr>
                 ))}
               </tbody>
             </T>
-            <p className="mt-3 text-[11px] text-slate-400">运行监控明细由 session 事件聚合生成，当前展示示例数据（接入中）。</p>
+            <p className="mt-3 text-[11px] text-slate-400">由 harness session 实时聚合（数字员工 + 任务标题 + token/成本）。</p>
           </TabsContent>
 
-          {/* 审计日志（示例数据） */}
+          {/* 审计日志（真实：审批事件） */}
           <TabsContent value="audit" className="mt-4">
             <T>
-              <thead><tr><th className={thCls}>时间</th><th className={thCls}>员工</th><th className={thCls}>事件类型</th><th className={thCls}>级别</th><th className={thCls}>详情</th><th className={thCls}>状态</th></tr></thead>
+              <thead><tr><th className={thCls}>时间</th><th className={thCls}>数字员工</th><th className={thCls}>事件</th><th className={thCls}>结果</th></tr></thead>
               <tbody>
-                {auditLogs.map(l => (
-                  <tr key={l.time} className="hover:bg-slate-50/70">
-                    <td className={tdCls}><span className="font-mono text-xs text-slate-400">{l.time}</span></td>
-                    <td className={tdCls}><span className="text-xs font-medium text-slate-700">{l.agent}</span></td>
-                    <td className={tdCls}><Pill tone={l.type === '越权拦截' ? 'red' : l.type === '权限变更' ? 'amber' : l.type === '分支外提交' ? 'amber' : 'slate'}>{l.type}</Pill></td>
-                    <td className={tdCls}><Pill tone={l.level === '高' ? 'red' : l.level === '中' ? 'amber' : 'slate'}>{l.level}</Pill></td>
-                    <td className={tdCls}><span className="text-xs text-slate-600 leading-5">{l.detail}</span></td>
-                    <td className={tdCls}><Pill tone={l.status === '已处置' || l.status === '已生效' ? 'green' : l.status === '待审批' ? 'amber' : 'slate'} dot={l.status !== '正常'}>{l.status}</Pill></td>
+                {audits.length === 0 ? (
+                  <tr><td colSpan={4} className={cn(tdCls, 'text-center text-slate-400')}>暂无审批记录（当数字员工请求执行危险命令时自动记录）</td></tr>
+                ) : audits.map(a => (
+                  <tr key={a.id} className="hover:bg-slate-50/70">
+                    <td className={tdCls}><span className="font-mono text-xs text-slate-400">{new Date(a.ts).toLocaleString('zh-CN')}</span></td>
+                    <td className={tdCls}><span className="text-xs font-medium text-slate-700">{a.agent}</span></td>
+                    <td className={tdCls}><span className="text-xs text-slate-600 leading-5">{a.detail}</span></td>
+                    <td className={tdCls}><Pill tone={a.outcome === 'allowed-once' ? 'green' : 'red'} dot>{a.outcome === 'allowed-once' ? '已批准' : '已拒绝'}</Pill></td>
                   </tr>
                 ))}
               </tbody>
             </T>
-            <p className="mt-3 text-[11px] text-slate-400">审计日志与项目基线、Human Gate 决策关联，当前展示示例数据（接入中）。</p>
+            <p className="mt-3 text-[11px] text-slate-400">审批审计：危险命令的申请与批准/拒绝，落盘 SQLite，供追溯。</p>
           </TabsContent>
         </Tabs>
       </div>

@@ -27,6 +27,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
 
 from harness_client import HarnessClient
+import activity_store
 
 
 class FlowState(TypedDict, total=False):
@@ -262,6 +263,14 @@ async def approval_node(state: FlowState, client: HarnessClient) -> FlowState:
     })
     await client.respond_approval(
         pending.get("rpc_id"), state["current_session_id"], pending.get("approvalId"), outcome,
+    )
+    # 审计落盘：记录「哪个数字员工请求执行了哪个危险命令，结果是批准/拒绝」。
+    activity_store.record_approval(
+        session_id=state["current_session_id"],
+        agent=STAGES[state["stage_index"]]["name"],
+        tool_name=pending.get("toolName") or "?",
+        reason=pending.get("reason") or "",
+        outcome=str(outcome),
     )
     state["pending"] = None
     return state

@@ -242,3 +242,34 @@ export function getAgents(): Promise<{ agents: DigitalAgent[] }> {
 export function getAgentsCost(): Promise<AgentsCost> {
   return flowJson('/agents/cost')
 }
+
+/** 运行监控：最近的 session 活动摘要。 */
+export interface AgentActivity {
+  sessionId: string
+  agent: string
+  agentName: string
+  title: string
+  tokens: number
+  cost: number
+  running: boolean
+  updatedAt: number
+}
+
+/** 审计记录（审批事件）。 */
+export interface AuditRecord {
+  id: number
+  session_id: string
+  agent: string
+  ts: number
+  kind: string
+  detail: string
+  outcome: string
+}
+
+export function getAgentsActivity(limit = 50): Promise<{ activities: AgentActivity[] }> {
+  return flowJson(`/agents/activity?limit=${limit}`)
+}
+
+export function getAgentsAudit(limit = 100): Promise<{ audits: AuditRecord[] }> {
+  return flowJson(`/agents/audit?limit=${limit}`)
+}
