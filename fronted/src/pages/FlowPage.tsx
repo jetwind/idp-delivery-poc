@@ -226,6 +226,30 @@ export default function FlowPage() {
             </div>
           )}
 
+          {/* 结构化产物 schema 校验子步骤 */}
+          {snapshot.validation.status !== 'pending' && (
+            <div className={cn('rounded-lg border px-4 py-3 flex items-start gap-2.5',
+              snapshot.validation.status === 'passed' ? 'border-emerald-200/70 bg-emerald-50/50'
+                : snapshot.validation.status === 'failed' ? 'border-rose-200/70 bg-rose-50/50'
+                  : 'border-amber-200/70 bg-amber-50/50')}>
+              {snapshot.validation.status === 'passed'
+                ? <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                : snapshot.validation.status === 'failed'
+                  ? <TriangleAlert className="w-4 h-4 text-rose-500 mt-0.5 shrink-0" />
+                  : <Loader2 className="w-4 h-4 text-amber-500 mt-0.5 shrink-0 animate-spin" />}
+              <div className="min-w-0">
+                <div className="text-[13px] font-medium text-slate-800">
+                  {snapshot.validation.status === 'passed' && '结构化产物已通过 schema 校验'}
+                  {snapshot.validation.status === 'retrying' && `结构化产物校验未通过，正在重试（第 ${snapshot.validation.attempts} 次）…`}
+                  {snapshot.validation.status === 'failed' && `结构化产物校验未通过（重试 ${snapshot.validation.attempts} 次后），等待人工介入`}
+                </div>
+                {snapshot.validation.error && (
+                  <div className="mt-1 text-xs text-slate-500 whitespace-pre-wrap font-mono">{snapshot.validation.error}</div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* question */}
           {pending?.type === 'question' && (
             <div className="bg-white rounded-lg border border-amber-200/70 px-5 py-4">

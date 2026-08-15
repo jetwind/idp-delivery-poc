@@ -54,6 +54,12 @@ export interface FlowSnapshot {
   cwd: string | null
   /** 后台图运行错误（有则显示）。 */
   error: string | null
+  /** 阶段产物 schema 校验状态（结构化产物子步骤）。 */
+  validation: {
+    status: 'pending' | 'passed' | 'retrying' | 'failed'
+    attempts: number
+    error: string | null
+  }
 }
 
 /** 一条实时活动日志（由编排层从 session.history 摘要而来）。 */
@@ -331,5 +337,32 @@ export function setAgentConfig(stage: string, cfg: AgentModelConfig): Promise<{ 
       reasoningEffort: cfg.reasoningEffort,
       permission: cfg.permission ?? null,
     }),
+  })
+}
+
+// ---- 阶段产物 JSON Schema 配置（结构化产物约定，图侧校验）----
+
+export interface StageSchemaInfo {
+  stage: string
+  title: string
+  required: string[]
+  schema: Record<string, unknown>
+}
+
+/** 所有阶段的产物 schema。 */
+export function getStagesSchema(): Promise<{ schemas: StageSchemaInfo[] }> {
+  return flowJson('/stages/schema')
+}
+
+/** 读某阶段的产物 schema。 */
+export function getStageSchema(stage: string): Promise<{ stage: string; schema: Record<string, unknown> }> {
+  return flowJson(`/stages/schema/${encodeURIComponent(stage)}`)
+}
+
+/** 设置某阶段的产物 schema。 */
+export function setStageSchema(stage: string, schema: Record<string, unknown>): Promise<{ ok: boolean }> {
+  return flowJson(`/stages/schema/${encodeURIComponent(stage)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ schema }),
   })
 }

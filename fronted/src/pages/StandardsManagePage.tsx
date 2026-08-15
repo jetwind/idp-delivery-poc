@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { deleteStandard, getStandardsTree, readStandard, writeStandard, type StandardsStage } from '@/api/flow'
+import { deleteStandard, getStandardsTree, readStandard, writeStandard, getStagesSchema, setStageSchema, type StandardsStage, type StageSchemaInfo } from '@/api/flow'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import { FileText, Plus, Save, Trash2, Folder, RefreshCw, Loader2 } from 'lucide-react'
+import { FileText, Plus, Save, Trash2, Folder, RefreshCw, Loader2, Braces } from 'lucide-react'
 
 export default function StandardsManagePage() {
   const [stages, setStages] = useState<StandardsStage[]>([])
@@ -17,6 +18,10 @@ export default function StandardsManagePage() {
   const [msgTone, setMsgTone] = useState<'ok' | 'err'>('ok')
   const [newName, setNewName] = useState('')
   const [newStage, setNewStage] = useState('')
+  const [schemas, setSchemas] = useState<StageSchemaInfo[]>([])
+  const [schemaStage, setSchemaStage] = useState('')
+  const [schemaText, setSchemaText] = useState('')
+  const [schemaDirty, setSchemaDirty] = useState(false)
 
   async function loadTree() {
     try {
@@ -28,7 +33,39 @@ export default function StandardsManagePage() {
     }
   }
 
-  useEffect(() => { void loadTree() }, [])
+  async function loadSchemas() {
+    try {
+      const r = await getStagesSchema()
+      setSchemas(r.schemas)
+      if (!schemaStage && r.schemas.length > 0) setSchemaStage(r.schemas[0].stage)
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), 'err')
+    }
+  }
+
+  async function openSchema(st: string) {
+    const s = schemas.find(x => x.stage === st)
+    if (!s) return
+    setSchemaStage(st)
+    setSchemaText(JSON.stringify(s.schema, null, 2))
+    setSchemaDirty(false)
+  }
+
+  async function saveSchema() {
+    if (!schemaStage || !schemaText.trim()) return
+    setBusy(true); setMsg(null)
+    try {
+      const parsed = JSON.parse(schemaText)
+      await setStageSchema(schemaStage, parsed)
+      setSchemaDirty(false)
+      show(`已保存 ${schemaStage} 的产物 Schema`)
+      await loadSchemas()
+    } catch (e) {
+      show(e instanceof Error ? e.message : String(e), 'err')
+    } finally { setBusy(false) }
+  }
+
+  useEffect(() => { void loadTree(); void loadSchemas() }, [])
 
   function show(text: string, tone: 'ok' | 'err' = 'ok') { setMsg(text); setMsgTone(tone) }
 
@@ -99,6 +136,13 @@ export default function StandardsManagePage() {
         </div>
       )}
 
+      <Tabs defaultValue="docs">
+        <TabsList className="bg-transparent border-b border-slate-100 rounded-none w-full justify-start h-10 p-0 gap-6 mb-4">
+          <TabsTrigger value="docs" className="rounded-none h-10 px-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-indigo-600 data-[state=active]:border-b-2 data-[state=active]:border-indigo-600 text-slate-500 text-[13px]">标准文档</TabsTrigger>
+          <TabsTrigger value="schema" className="rounded-none h-10 px-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-indigo-600 data-[state=active]:border-b-2 data-[state=active]:border-indigo-600 text-slate-500 text-[13px]">产物 Schema</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="docs">
       <div className="flex gap-4 items-start">
         {/* 左侧：阶段文件树 + 新建 */}
         <div className="w-[280px] shrink-0 space-y-4">
@@ -181,6 +225,59 @@ export default function StandardsManagePage() {
           )}
         </div>
       </div>
+        </TabsContent>
+
+        {/* 产物 Schema 配置 */}
+        <TabsContent value="schema">
+          <div className="flex gap-4 items-start">
+            <div className="w-[280px] shrink-0 bg-white rounded-lg border border-slate-200/80">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
+                <Braces className="w-4 h-4 text-indigo-500" />
+                <span className="text-[13px] font-semibold text-slate-800">阶段产物 Schema</span>
+              </div>
+              <div className="p-2">
+                {schemas.map(s => {
+                  const active = schemaStage === s.stage
+                  return (
+                    <button key={s.stage} onClick={() => openSchema(s.stage)}
+                      className={cn('w-full text-left px-3 py-2 rounded text-xs flex items-center justify-between',
+                        active ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50')}>
+                      <span>{s.title}</span>
+                      <span className="text-[10px] text-slate-400">{s.required.length} 必填</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="px-4 pb-3 text-[11px] text-slate-400">结构化产物约定：agent 按 schema 产出 JSON，图侧 jsonschema 校验。</p>
+            </div>
+            <div className="flex-1 min-w-0 bg-white rounded-lg border border-slate-200/80">
+              {schemaStage ? (
+                <>
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <Braces className="w-4 h-4 text-slate-500" />
+                      <span className="text-[13px] font-mono text-slate-700">{schemaStage} 的 JSON Schema</span>
+                      {schemaDirty && <span className="text-xs text-amber-500">未保存</span>}
+                    </div>
+                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busy || !schemaDirty} onClick={saveSchema}>
+                      {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1" />}
+                      保存 Schema
+                    </Button>
+                  </div>
+                  <Textarea
+                    value={schemaText}
+                    onChange={e => { setSchemaText(e.target.value); setSchemaDirty(true) }}
+                    className="min-h-[460px] border-0 rounded-none font-mono text-[12.5px] leading-5 focus-visible:ring-0 resize-none"
+                    placeholder='{"type":"object","required":[...],"properties":{...}}'
+                  />
+                </>
+              ) : (
+                <div className="flex items-center justify-center h-[420px] text-sm text-slate-400">从左侧选择阶段查看/编辑 Schema</div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

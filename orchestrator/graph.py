@@ -29,6 +29,7 @@ from langgraph.types import interrupt
 from harness_client import HarnessClient
 import activity_store
 import config_store
+import schema_store
 
 
 class FlowState(TypedDict, total=False):
@@ -40,6 +41,9 @@ class FlowState(TypedDict, total=False):
     stage_done: bool
     stage_committed: bool
     artifacts: dict[str, list[str]]
+    validation_attempts: int
+    validation_error: str | None
+    validation_status: str
 
 
 STAGES: list[dict[str, Any]] = [
@@ -243,7 +247,11 @@ async def poll_stage(state: FlowState, client: HarnessClient) -> FlowState:
         return state
 
     state["stage_done"] = True
-    state.setdefault("artifacts", {})[stage["id"]] = stage.get("output_files", [])
+    out_files = list(stage.get("output_files", []))
+    json_out = schema_store.STAGE_OUTPUT_JSON.get(stage["id"])
+    if json_out and json_out not in out_files:
+        out_files.append(json_out)
+    state.setdefault("artifacts", {})[stage["id"]] = out_files
     if not state.get("stage_committed"):
         git_commit(state["cwd"], f"delivery: {stage['name']} 阶段产物")
         state["stage_committed"] = True
@@ -289,6 +297,63 @@ async def approval_node(state: FlowState, client: HarnessClient) -> FlowState:
     return state
 
 
+MAX_VALIDATION_ATTEMPTS = 2
+
+
+async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
+    """图侧确定性校验：读产物 JSON + jsonschema 校验，失败重试（限次）→ 升级人工。
+
+    铁律 2/3：产物的「形状」由 jsonschema 验，「完成」由这条边判，不信 agent 自报。
+    """
+    stage = STAGES[state["stage_index"]]
+    stage_id = stage["id"]
+    schema = schema_store.get_schema(stage_id)
+    out_json = schema_store.STAGE_OUTPUT_JSON.get(stage_id)
+    if not schema or not out_json:
+        state["validation_status"] = "passed"
+        state["validation_error"] = None
+        return state
+
+    full = os.path.join(state["cwd"], out_json)
+    errors: list[str] = []
+    if not os.path.isfile(full):
+        errors = [f"产物文件不存在：{out_json}"]
+    else:
+        try:
+            with open(full, encoding="utf-8") as f:
+                instance = json.load(f)
+        except json.JSONDecodeError as exc:
+            errors = [f"产物不是合法 JSON：{exc}"]
+        except Exception as exc:  # noqa: BLE001 - 读产物失败按校验失败处理
+            errors = [f"读产物失败：{exc}"]
+        else:
+            errors = schema_store.validate_instance(schema, instance)
+
+    if not errors:
+        state["validation_status"] = "passed"
+        state["validation_error"] = None
+        return state
+
+    attempts = state.get("validation_attempts", 0) + 1
+    state["validation_attempts"] = attempts
+    state["validation_error"] = "\n".join(errors)
+    if attempts < MAX_VALIDATION_ATTEMPTS:
+        # 重试：把失败原因反馈给 agent，让它修正后重新写文件。
+        state["validation_status"] = "retrying"
+        state["stage_done"] = False
+        feedback = (
+            f"你产出的结构化文件 {out_json} 未通过 schema 校验，请修正后重新用 write 写入该文件。\n"
+            f"校验错误（{len(errors)} 条）：\n" + "\n".join(f"- {e}" for e in errors) + "\n"
+            f"请严格遵循给定的 JSON Schema 修正内容。"
+        )
+        await client.prompt(state["current_session_id"], feedback)
+        return state
+
+    state["validation_status"] = "failed"
+    state["stage_done"] = True
+    return state
+
+
 def gate_node(state: FlowState) -> FlowState:
     stage = STAGES[state["stage_index"]]
     decision = interrupt({"type": "gate", "stage": stage["name"]})
@@ -316,11 +381,15 @@ def build_graph(client: HarnessClient):
     async def approval(state: FlowState) -> FlowState:
         return await approval_node(state, client)
 
+    async def validate(state: FlowState) -> FlowState:
+        return await validate_node(state, client)
+
     g = StateGraph(FlowState)
     g.add_node("start", start)
     g.add_node("poll", poll)
     g.add_node("question", question)
     g.add_node("approval", approval)
+    g.add_node("validate", validate)
     g.add_node("gate", gate_node)
 
     g.add_edge(START, "start")
@@ -331,14 +400,21 @@ def build_graph(client: HarnessClient):
         if pending:
             return pending.get("kind") or "poll"
         if state.get("stage_done"):
-            return "gate"
+            return "validate"
         return "poll"
 
     g.add_conditional_edges("poll", route_poll, {
-        "question": "question", "approval": "approval", "gate": "gate", "poll": "poll",
+        "question": "question", "approval": "approval", "validate": "validate", "poll": "poll",
     })
     g.add_edge("question", "poll")
     g.add_edge("approval", "poll")
+
+    def route_validate(state: FlowState) -> str:
+        if state.get("validation_status") == "retrying":
+            return "poll"
+        return "gate"
+
+    g.add_conditional_edges("validate", route_validate, {"gate": "gate", "poll": "poll"})
 
     def route_gate(state: FlowState) -> str:
         if state["stage_index"] >= len(STAGES):

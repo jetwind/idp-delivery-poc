@@ -26,9 +26,11 @@ from langgraph.types import Command
 
 from graph import STAGES, build_graph
 from harness_client import HarnessClient
+import jsonschema
 import standards_store
 import activity_store
 import config_store
+import schema_store
 
 app = FastAPI(title="delivery-orchestrator")
 app.add_middleware(
@@ -63,6 +65,8 @@ standards_store.init_db(os.path.join(DELIVERY_ROOT, "standards"))
 activity_store.init_db()
 # 数字员工模型配置：SQLite。
 config_store.init_db()
+# 阶段产物 JSON Schema：SQLite（内置默认 + 可配置）。
+schema_store.init_db()
 
 
 def _is_git_url(value: str) -> bool:
@@ -281,6 +285,11 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
         "current_session_id": values.get("current_session_id"),
         "cwd": values.get("cwd"),
         "error": _flow_errors.get(thread_id),
+        "validation": {
+            "status": values.get("validation_status", "pending"),
+            "attempts": values.get("validation_attempts", 0),
+            "error": values.get("validation_error"),
+        },
     }
 
 
@@ -367,6 +376,40 @@ async def resume(thread_id: str, req: ResumeRequest) -> dict[str, Any]:
 @app.get("/flow/stages")
 async def stages() -> list[dict[str, Any]]:
     return [{"id": s["id"], "name": s["name"]} for s in STAGES]
+
+
+# ---- 阶段产物 JSON Schema 配置（结构化产物约定，图侧 jsonschema 校验）----
+
+class SchemaRequest(BaseModel):
+    schema: dict
+
+
+@app.get("/stages/schema")
+async def stages_schema() -> dict[str, Any]:
+    """所有阶段的产物 schema（含 title/required + 完整 schema）。"""
+    return {"schemas": schema_store.list_schemas()}
+
+
+@app.get("/stages/schema/{stage}")
+async def stage_schema(stage: str) -> dict[str, Any]:
+    if stage not in _STAGE_IDS:
+        raise HTTPException(status_code=400, detail=f"未知阶段：{stage}")
+    schema = schema_store.get_schema(stage)
+    if schema is None:
+        raise HTTPException(status_code=404, detail=f"阶段 {stage} 无 schema")
+    return {"stage": stage, "schema": schema}
+
+
+@app.put("/stages/schema/{stage}")
+async def stage_set_schema(stage: str, req: SchemaRequest) -> dict[str, Any]:
+    if stage not in _STAGE_IDS:
+        raise HTTPException(status_code=400, detail=f"未知阶段：{stage}")
+    try:
+        jsonschema.Draft202012Validator.check_schema(req.schema)
+    except jsonschema.SchemaError as exc:
+        raise HTTPException(status_code=400, detail=f"非法 JSON Schema：{exc.message}") from exc
+    schema_store.set_schema(stage, req.schema)
+    return {"stage": stage, "ok": True}
 
 
 # ---- standards 管理（阶段标准 CRUD，SQLite 集中存储，经 streamable-http MCP 给多个 harness）----
