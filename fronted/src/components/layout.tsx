@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  LayoutGrid, FolderPlus, Workflow, Gauge, Radar, Bot, BookOpen,
+  LayoutGrid, Workflow, Gauge, Radar, Bot, BookOpen,
   Search, ChevronDown, Hexagon, CircleUser, Check,
 } from 'lucide-react'
 
@@ -23,7 +23,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       title: '项目中心',
       items: [
         { to: '/projects', label: '项目列表', icon: LayoutGrid, end: true },
-        { to: '/projects/new', label: '新增项目', icon: FolderPlus },
         { to: `${P}/flow`, label: 'AI 流水线', icon: Workflow },
       ],
     },
