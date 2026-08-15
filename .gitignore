@@ -32,3 +32,6 @@ Thumbs.db
 
 #
 *.docx
+
+# 标准集中存储数据库（运行时数据，种子在 standards/*.md）
+standards.db

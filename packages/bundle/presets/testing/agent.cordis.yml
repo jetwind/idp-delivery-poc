@@ -37,11 +37,7 @@
   name: '@deepseek-ai/dsh-mcp-client'
   config:
     serverName: standards-testing
-    transport: stdio
-    command: python
-    args:
-      - '-u'
-      - !!js process.env.DSH_STANDARDS_SERVER || 'D:/ccn-work/src/github/deepseek-harness-delivery/mcp/standards_server.py'
-    env: {}
-    cwd: ''
+    transport: streamable-http
+    url: http://127.0.0.1:8080/mcp
+    headers: {}
     failOnStartupError: false

@@ -18,13 +18,15 @@ import subprocess
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from langgraph.types import Command
 
 from graph import STAGES, build_graph
 from harness_client import HarnessClient
+import standards_store
 
 app = FastAPI(title="delivery-orchestrator")
 app.add_middleware(
@@ -52,6 +54,9 @@ async def _run_flow(thread_id: str, input_: Any, config: dict[str, Any]) -> None
 # 交付文件夹根目录（orchestrator/ 的上一级），git URL clone 到这里下的 projects/。
 DELIVERY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _GIT_URL_PREFIXES = ("http://", "https://", "git@", "ssh://", "git://")
+
+# 标准集中存储：SQLite（首次启动从 standards/*.md 导入种子，之后以 DB 为准）。
+standards_store.init_db(os.path.join(DELIVERY_ROOT, "standards"))
 
 
 def _is_git_url(value: str) -> bool:
@@ -358,13 +363,9 @@ async def stages() -> list[dict[str, Any]]:
     return [{"id": s["id"], "name": s["name"]} for s in STAGES]
 
 
-# ---- standards 管理（阶段标准文件 CRUD，供后台 UI 维护，经 MCP 给 harness）----
+# ---- standards 管理（阶段标准 CRUD，SQLite 集中存储，经 streamable-http MCP 给多个 harness）----
 
 _STAGE_IDS = [s["id"] for s in STAGES]
-
-
-def _standards_dir(stage: str) -> str:
-    return os.path.join(DELIVERY_ROOT, "standards", stage)
 
 
 def _check_stage(stage: str) -> None:
@@ -379,12 +380,11 @@ def _check_name(name: str) -> None:
 
 @app.get("/standards/tree")
 async def standards_tree() -> dict[str, Any]:
-    """各阶段标准文件清单（供管理 UI 渲染目录树）。"""
+    """各阶段标准清单（供管理 UI 渲染目录树）。"""
     result = []
+    by_stage = {r["stage"]: r["files"] for r in standards_store.list_stages()}
     for s in STAGES:
-        d = _standards_dir(s["id"])
-        files = sorted(f for f in os.listdir(d) if f.endswith(".md")) if os.path.isdir(d) else []
-        result.append({"stage": s["id"], "name": s["name"], "files": files})
+        result.append({"stage": s["id"], "name": s["name"], "files": by_stage.get(s["id"], [])})
     return {"stages": result}
 
 
@@ -392,11 +392,9 @@ async def standards_tree() -> dict[str, Any]:
 async def standards_read(stage: str, name: str) -> dict[str, Any]:
     _check_stage(stage)
     _check_name(name)
-    path = os.path.join(_standards_dir(stage), name)
-    if not os.path.isfile(path):
+    content = standards_store.read(stage, name)
+    if content is None:
         raise HTTPException(status_code=404, detail=f"文件不存在：{stage}/{name}")
-    with open(path, encoding="utf-8") as f:
-        content = f.read()
     return {"stage": stage, "name": name, "content": content}
 
 
@@ -408,10 +406,7 @@ class StandardsWriteRequest(BaseModel):
 async def standards_write(stage: str, name: str, req: StandardsWriteRequest) -> dict[str, Any]:
     _check_stage(stage)
     _check_name(name)
-    d = _standards_dir(stage)
-    os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, name), "w", encoding="utf-8", newline="\n") as f:
-        f.write(req.content)
+    standards_store.write(stage, name, req.content)
     return {"stage": stage, "name": name, "ok": True}
 
 
@@ -419,11 +414,132 @@ async def standards_write(stage: str, name: str, req: StandardsWriteRequest) -> 
 async def standards_delete(stage: str, name: str) -> dict[str, Any]:
     _check_stage(stage)
     _check_name(name)
-    path = os.path.join(_standards_dir(stage), name)
-    if not os.path.isfile(path):
+    if not standards_store.delete(stage, name):
         raise HTTPException(status_code=404, detail=f"文件不存在：{stage}/{name}")
-    os.remove(path)
     return {"stage": stage, "name": name, "ok": True}
+
+
+# ---- MCP（streamable-http，POST /mcp，JSON-RPC over HTTP）----
+
+_MCP_TOOLS = [
+    {
+        "name": "list_stage_standards",
+        "description": "列出指定交付阶段（requirements/design/tasks/coding/testing）可用的标准/规范/领域知识清单，含标题与摘要。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"stage": {"type": "string", "description": "阶段 id", "enum": _STAGE_IDS}},
+            "required": ["stage"],
+        },
+    },
+    {
+        "name": "get_standard",
+        "description": "读取指定阶段某份标准/规范的全文。standard_id 取 list_stage_standards 返回的文件名（含 .md）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "stage": {"type": "string", "description": "阶段 id", "enum": _STAGE_IDS},
+                "standard_id": {"type": "string", "description": "标准文件名（含 .md）"},
+            },
+            "required": ["stage", "standard_id"],
+        },
+    },
+    {
+        "name": "search_standards",
+        "description": "按关键词全文搜索所有阶段的标准文档。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"keyword": {"type": "string", "description": "搜索关键词"}},
+            "required": ["keyword"],
+        },
+    },
+]
+
+
+def _mcp_list_stage_standards(args: dict) -> dict:
+    stage = args.get("stage", "")
+    if stage not in _STAGE_IDS:
+        return {"content": [{"type": "text", "text": f"未知阶段：{stage}。可用：{', '.join(_STAGE_IDS)}"}], "isError": True}
+    items = standards_store.get_all(stage)
+    if not items:
+        return {"content": [{"type": "text", "text": f"阶段 {stage} 暂无标准。"}]}
+    text = f"阶段 {stage} 的标准清单：\n\n" + "\n\n".join(f"- {name}｜{title}\n  {summary}" for name, title, summary in items)
+    return {"content": [{"type": "text", "text": text}]}
+
+
+def _mcp_get_standard(args: dict) -> dict:
+    stage = args.get("stage", "")
+    sid = args.get("standard_id", "")
+    if stage not in _STAGE_IDS:
+        return {"content": [{"type": "text", "text": f"未知阶段：{stage}"}], "isError": True}
+    content = standards_store.read(stage, sid)
+    if content is None:
+        return {"content": [{"type": "text", "text": f"标准不存在：{stage}/{sid}"}], "isError": True}
+    return {"content": [{"type": "text", "text": content}]}
+
+
+def _mcp_search_standards(args: dict) -> dict:
+    kw = args.get("keyword", "")
+    if not kw:
+        return {"content": [{"type": "text", "text": "keyword 不能为空"}], "isError": True}
+    hits = standards_store.search(kw)
+    if not hits:
+        return {"content": [{"type": "text", "text": f"未找到包含「{kw}」的标准。"}]}
+    return {"content": [{"type": "text", "text": "命中：\n" + "\n".join(hits[:20])}]}
+
+
+def _handle_mcp(method, params, msg_id):
+    if method == "initialize":
+        pv = (params or {}).get("protocolVersion", "2025-06-18")
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {
+            "protocolVersion": pv,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "delivery-standards", "version": "2.0.0"},
+        }}
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
+    if method == "tools/list":
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": _MCP_TOOLS}}
+    if method == "tools/call":
+        name = (params or {}).get("name")
+        args = (params or {}).get("arguments") or {}
+        try:
+            if name == "list_stage_standards":
+                result = _mcp_list_stage_standards(args)
+            elif name == "get_standard":
+                result = _mcp_get_standard(args)
+            elif name == "search_standards":
+                result = _mcp_search_standards(args)
+            else:
+                result = {"content": [{"type": "text", "text": f"未知工具：{name}"}], "isError": True}
+        except Exception as exc:  # noqa: BLE001 - 工具内部错误透出为文本
+            result = {"content": [{"type": "text", "text": f"工具执行出错：{exc}"}], "isError": True}
+        return {"jsonrpc": "2.0", "id": msg_id, "result": result}
+    return None
+
+
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    """MCP streamable-http 端点：接受 JSON-RPC（单个或数组），返回 JSON 响应；纯通知返回 202。"""
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"非法 JSON：{exc}") from exc
+    messages = body if isinstance(body, list) else [body]
+    responses = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        msg_id = msg.get("id")
+        if msg_id is None:
+            continue  # 通知（notifications/initialized 等）不响应
+        resp = _handle_mcp(msg.get("method"), msg.get("params"), msg_id)
+        if resp is not None:
+            responses.append(resp)
+    if not responses:
+        return Response(status_code=202)
+    if isinstance(body, list):
+        return JSONResponse(responses)
+    return JSONResponse(responses[0])
 
 
 if __name__ == "__main__":
