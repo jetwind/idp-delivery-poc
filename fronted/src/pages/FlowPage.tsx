@@ -396,12 +396,12 @@ export default function FlowPage() {
                 <ShieldCheck className="w-4 h-4 text-violet-500" />
                 <span className="text-[13px] font-semibold text-slate-800">「{pending.stage}」阶段已完成，等待人工确认</span>
               </div>
-              <p className="text-xs text-slate-500 mb-3">确认通过进入下一阶段；不通过时填写补充意见，agent 会据此修正后再次提交，可反复直到满足要求。</p>
+              <p className="text-xs text-slate-500 mb-3">确认通过进入下一阶段；不通过时填写补充矫正意见（必填），agent 据此在当前版本上增量修订后再次提交。</p>
               <Textarea
                 rows={3}
                 value={gateFeedback}
                 onChange={e => setGateFeedback(e.target.value)}
-                placeholder="补充修改意见（可选），例如：需求里缺少性能指标、字段命名改为 xxx、补充异常场景…"
+                placeholder="补充矫正意见（必填），例如：需求里缺少性能指标、字段命名改为 xxx、补充异常场景…"
                 className="mb-3 text-xs"
               />
               <div className="flex gap-2">
@@ -409,8 +409,8 @@ export default function FlowPage() {
                   {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
                   确认通过
                 </Button>
-                <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50" disabled={busy} onClick={() => submitGate('revise')}>
-                  <XCircle className="w-3.5 h-3.5 mr-1" />退回重做（含补充意见）
+                <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50" disabled={busy || !gateFeedback.trim()} onClick={() => submitGate('revise')}>
+                  <XCircle className="w-3.5 h-3.5 mr-1" />补充矫正
                 </Button>
               </div>
             </div>
