@@ -193,7 +193,7 @@ GIT_TIMEOUT_SECONDS = 60
 def _git_commit_sync(cwd: str, message: str) -> bool:
     try:
         subprocess.run(
-            ["git", "add", "-A"], cwd=cwd, check=False, capture_output=True,
+            ["git", "add", "-A", "."], cwd=cwd, check=False, capture_output=True,
             timeout=GIT_TIMEOUT_SECONDS, stdin=subprocess.DEVNULL,
         )
         r = subprocess.run(

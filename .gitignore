@@ -23,8 +23,8 @@ venv/
 # git URL clone 出来的交付项目（编排层 _resolve_cwd 生成）
 projects/
 
-# 运行时测试产物目录（agent 生成，非交付内容）
-examples/002/
+# examples/ 下的交付 demo 与运行时产物均不入库，只提交平台代码
+examples/
 
 # 编辑器 / 系统
 .vscode/
