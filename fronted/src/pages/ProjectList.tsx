@@ -1,15 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { deleteProject, getProjects, type Project } from '@/api/flow'
+import { useProject } from '@/hooks/project'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Plus, Play, Trash2, Loader2, FolderGit2 } from 'lucide-react'
 
 export default function ProjectList() {
   const nav = useNavigate()
+  const { setProjectId } = useProject()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
+
+  function open(id: string) {
+    setProjectId(id)
+    nav(`/projects/${id}/flow`)
+  }
 
   async function load() {
     try {
@@ -71,7 +78,7 @@ export default function ProjectList() {
               <p className="mt-3 text-xs leading-5 text-slate-500 flex-1 line-clamp-3">{p.requirement_text}</p>
               <div className="mt-2 text-[11px] text-slate-400 font-mono truncate" title={p.cwd}>{p.cwd}</div>
               <div className="mt-3 flex items-center gap-2">
-                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => nav(`/projects/${p.id}/flow`)}>
+                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => open(p.id)}>
                   <Play className="w-3.5 h-3.5 mr-1" />{p.thread_id ? '继续流水线' : '进入流水线'}
                 </Button>
                 <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50" disabled={busyId === p.id} onClick={() => remove(p.id)}>
