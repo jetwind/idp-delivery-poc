@@ -43,56 +43,98 @@ class FlowState(TypedDict, total=False):
 STAGES: list[dict[str, Any]] = [
     {
         "id": "requirements",
-        "name": "需求分析",
+        "name": "01 需求",
         "preset": "requirements",
         "input_files": [],
         "output_files": ["specs/requirements.md"],
         "task": (
-            "当前处于【需求】阶段。请阅读工作区已有材料，把用户原始需求收敛为清晰、可验收的"
-            "需求规格。有歧义时用 ask_user_question 澄清；能用阅读解决的事实不要问。"
-            "产出物用 write 工具写入 specs/requirements.md，结构固定为章节（完整/待补充/缺失）"
-            "+ 检查项（阻断/风险/建议）+ 待确认问题清单。"
-            "定稿前用 ask_user_question 提交定稿确认（「确认定稿」/「修改后继续」），"
-            "用户确认定稿前不要把需求作为下一阶段输入。"
+            "当前处于【01 需求】阶段。请阅读工作区已有材料，把用户原始需求收敛为清晰、可验收、可测试的需求规格。\n\n"
+            "采用业界需求方法论：\n"
+            "1. 用户故事/用例：为每个核心场景写「作为<角色>，我希望<能力>，以便<价值>」，标注优先级（MoSCoW：Must/Should/Could/Won't）。\n"
+            "2. 验收标准：每条需求给出 Given/When/Then 形式、可自动化验证的验收标准。\n"
+            "3. 边界与约束：明确非功能需求（性能/安全/可用性）、范围外事项、假设与依赖。\n\n"
+            "有歧义时用 ask_user_question 澄清（用户拥有的选择或材料无法回答的事实）；能用阅读解决的事实不要问。\n\n"
+            "产出物用 write 工具写入 specs/requirements.md，模板固定为：\n"
+            "# 需求规格\n## 1. 背景与目标\n## 2. 角色与场景（用户故事，含优先级）\n"
+            "## 3. 功能需求（逐条，含 Given/When/Then 验收标准）\n## 4. 非功能需求\n"
+            "## 5. 范围外与约束\n## 6. 风险与待确认问题\n\n"
+            "定稿前用 ask_user_question 提交定稿确认（选项「确认定稿」/「修改后继续」）；"
+            "用户未确认定稿前，不要把需求作为下一阶段输入。"
         ),
     },
     {
         "id": "design",
-        "name": "架构设计",
+        "name": "02 详细设计",
         "preset": "design",
         "input_files": ["specs/requirements.md"],
         "output_files": ["docs/design.md"],
         "task": (
-            "当前处于【设计】阶段。基于下面给出的已验收需求规格产出架构与技术方案：模块划分、"
-            "数据流、接口与数据结构、依赖与技术选型、边界与失败模式、测试策略与验收标准。"
-            "先读需求再设计，方案要具体到另一名工程师无需再做设计决策即可实现。"
-            "设计文档写入工作区 docs/design.md，实施任务清单用 todo_write 记录，不要写实现代码。"
+            "当前处于【02 详细设计】阶段。基于下面给出的已定稿需求规格，产出可直接指导实现与任务拆分的详细设计。\n\n"
+            "设计覆盖三个层次：\n"
+            "1. 业务设计：业务流程（关键路径/异常路径）、领域模型（实体/值对象/聚合及关系）、业务规则。\n"
+            "2. 架构设计：技术架构与模块划分、服务边界（标注「新建服务」或「升级现有服务」）、数据流与通信方式（同步/异步）、"
+            "技术选型（后端 Java 21 + Spring Boot、前端 Vue，需求另有指定则遵循）。\n"
+            "3. 详细模块设计：每个模块/服务的职责、对外接口（REST 路径/入参出参）、内部数据结构、依赖关系、关键实现要点与失败模式。\n\n"
+            "方案要具体到另一名工程师无需再做设计决策即可实现。本阶段不写实现代码，用 todo_write 跟踪设计条目。\n\n"
+            "设计文档写入 docs/design.md，模板固定为：\n"
+            "# 详细设计\n## 1. 业务设计（流程 + 领域模型 + 业务规则）\n## 2. 架构设计（模块/服务划分 + 数据流 + 技术选型）\n"
+            "## 3. 详细模块设计（每个模块：职责/接口/数据结构/依赖）\n## 4. 服务归属清单（新建 vs 升级现有）\n"
+            "## 5. 非功能与失败模式\n## 6. 实施顺序建议"
+        ),
+    },
+    {
+        "id": "tasks",
+        "name": "03 任务",
+        "preset": "tasks",
+        "input_files": ["specs/requirements.md", "docs/design.md"],
+        "output_files": ["specs/tasks.md"],
+        "task": (
+            "当前处于【03 任务】阶段。基于下面给出的需求规格与详细设计，把工作拆分成可独立执行、可验收的开发任务，并按依赖编排执行顺序。\n\n"
+            "用 INVEST 原则拆分每个任务（Independent 独立、Negotiable 可协商、Valuable 有价值、Estimable 可估算、Small 足够小、Testable 可测试）：\n"
+            "1. 每个任务明确归属到具体服务，标注「新建服务」或「升级现有服务」，技术栈：后端 Java 21 + Spring Boot、前端 Vue。\n"
+            "2. 标注任务之间的依赖（哪些任务必须在哪些任务之后）。\n"
+            "3. 按依赖关系给出「任务环」（执行批次）：同一环内的任务互不依赖、可并行；环与环之间串行。\n\n"
+            "本阶段只拆任务、不写实现代码。产出物用 write 工具写入 specs/tasks.md，模板固定为：\n"
+            "# 任务拆解\n## 1. 服务清单（服务名 → 新建/升级 + 技术栈）\n"
+            "## 2. 任务列表（每个任务：ID、标题、服务归属、INVEST 评估、验收标准、依赖任务、估算）\n"
+            "## 3. 依赖关系（文本描述）\n## 4. 任务环编排（第 1 环可并行任务 / 第 2 环 / ...）"
         ),
     },
     {
         "id": "coding",
-        "name": "代码编写",
+        "name": "04 编码",
         "preset": "coding",
-        "input_files": ["specs/requirements.md", "specs/services.md"],
-        "output_files": ["specs/implementation.md", "services/"],
+        "input_files": ["specs/tasks.md", "docs/design.md"],
+        "output_files": ["specs/implementation.md", "services/", "frontend/"],
         "task": (
-            "当前处于【代码编写】阶段。基于下面给出的需求规格与服务关联，逐项实现功能："
-            "先建 todo 清单，再实现并用实际运行验证（运行测试、执行命令、阅读报错）。"
-            "实现说明用 write 工具写入 specs/implementation.md，包含每个服务的改动点与验证方式。"
-            "完成后把产物交给测试阶段。"
+            "当前处于【04 编码】阶段。基于下面给出的任务拆解（specs/tasks.md）与详细设计（docs/design.md），逐环实现代码。\n\n"
+            "实现要求：\n"
+            "1. 按任务环顺序推进；同一环内互不依赖的任务用 subagent 并行委派，或用 workflow 编排多代理流程。\n"
+            "2. 每个任务实现后写单元测试，并实际运行验证（编译通过、测试通过、应用可启动）。\n"
+            "3. 后端放 services/ 下（Spring Boot，Java 21），前端放 frontend/ 下（Vue）。\n"
+            "4. 优先复用现有模式，小步提交，不越过本阶段范围改需求或做发布决策。\n\n"
+            "实现说明用 write 工具写入 specs/implementation.md，模板固定为：\n"
+            "# 实现说明\n## 1. 每个任务的改动点与验证方式\n## 2. 服务/模块清单（新建/升级 + 目录位置）\n"
+            "## 3. 编译与运行方式（命令）\n## 4. 遗留问题与 TODO"
         ),
     },
     {
         "id": "testing",
-        "name": "测试验证",
+        "name": "05 测试",
         "preset": "testing",
-        "input_files": ["specs/requirements.md", "specs/implementation.md"],
+        "input_files": ["specs/requirements.md", "specs/implementation.md", "specs/tasks.md"],
         "output_files": ["docs/test-report.md"],
         "task": (
-            "当前处于【测试】阶段。对照下面给出的需求验收标准与实现说明逐项验证："
-            "运行测试与静态检查、构造边界用例、复现可疑行为。结论必须来自实际运行而非推断。"
-            "缺陷记录为可复现的问题报告（步骤、期望、实际、影响范围）。"
-            "产出物写入工作区 docs/test-report.md，用 todo_write 跟踪验证条目。"
+            "当前处于【05 测试】阶段。对照下面给出的需求验收标准、实现说明与任务清单，逐项验证交付质量。\n\n"
+            "测试覆盖三层：\n"
+            "1. 单元测试：运行后端（mvn test / gradle test）与前端（npm test）的单元测试，确认全部通过。\n"
+            "2. 接口测试：对核心 REST 接口编写并执行接口测试（构造正常/边界/异常用例）。\n"
+            "3. e2e 测试：跑通端到端主流程（关键用户路径），记录结果。\n\n"
+            "结论必须来自实际运行而非推断；缺陷记录为可复现的问题报告（步骤、期望、实际、影响范围）。\n\n"
+            "产出物用 write 工具写入 docs/test-report.md，模板固定为：\n"
+            "# 测试报告\n## 1. 测试范围与结论（通过/失败汇总）\n## 2. 单元测试结果（命令 + 通过率）\n"
+            "## 3. 接口测试结果（用例清单 + 结果）\n## 4. e2e 测试结果（主流程 + 结果）\n"
+            "## 5. 缺陷清单（可复现问题报告）\n## 6. 风险与建议"
         ),
     },
 ]

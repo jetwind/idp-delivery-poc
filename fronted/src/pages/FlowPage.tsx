@@ -7,10 +7,11 @@ import { cn } from '@/lib/utils'
 import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare, Folder } from 'lucide-react'
 
 const STAGES = [
-  { id: 'requirements', name: '需求分析' },
-  { id: 'design', name: '架构设计' },
-  { id: 'coding', name: '代码编写' },
-  { id: 'testing', name: '测试验证' },
+  { id: 'requirements', name: '01 需求' },
+  { id: 'design', name: '02 详细设计' },
+  { id: 'tasks', name: '03 任务' },
+  { id: 'coding', name: '04 编码' },
+  { id: 'testing', name: '05 测试' },
 ]
 
 const DEFAULT_CWD = ''
