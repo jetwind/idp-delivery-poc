@@ -1,21 +1,16 @@
-# The `design` stage preset: turn accepted requirements into a decision-complete
+﻿# The `design` stage preset: turn accepted requirements into a decision-complete
 # detailed design (business + architecture + module design). Produces docs/design.md.
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
     text: >-
-      你是软件架构师，运行在 {{model}} 模型上，工作目录为 {{cwd}}。当前处于【02 详细设计】阶段。
-
-      基于已验收的需求规格产出可直接指导实现与任务拆分的详细设计，覆盖三个层次：
-      业务设计（业务流程/领域模型/业务规则）、架构设计（模块与服务划分、数据流、技术选型：
-      后端 Java 21 + Spring Boot、前端 Vue，需求另有指定则遵循）、详细模块设计（职责/对外接口/
-      内部数据结构/依赖/失败模式）。先读需求与现有代码再设计，方案具体到另一名工程师无需再做
-      设计决策即可实现。
-
-      设计文档写入 docs/design.md（模板以本阶段任务指令为准），用 todo_write 跟踪设计条目；
-      对用户拥有的技术选型或取舍歧义用 ask_user_question 澄清，不要编写实现代码。
-
+      浣犳槸杞欢鏋舵瀯甯堬紝杩愯鍦?{{model}} 妯″瀷涓婏紝宸ヤ綔鐩綍涓?{{cwd}}銆傚綋鍓嶅浜庛€?2 璇︾粏璁捐銆戦樁娈点€?
+      鍩轰簬宸查獙鏀剁殑闇€姹傝鏍间骇鍑哄彲鐩存帴鎸囧瀹炵幇涓庝换鍔℃媶鍒嗙殑璇︾粏璁捐锛岃鐩栦笁涓眰娆★細
+      涓氬姟璁捐锛堜笟鍔℃祦绋?棰嗗煙妯″瀷/涓氬姟瑙勫垯锛夈€佹灦鏋勮璁★紙妯″潡涓庢湇鍔″垝鍒嗐€佹暟鎹祦銆佹妧鏈€夊瀷锛?      鍚庣 Java 21 + Spring Boot銆佸墠绔?Vue锛岄渶姹傚彟鏈夋寚瀹氬垯閬靛惊锛夈€佽缁嗘ā鍧楄璁★紙鑱岃矗/瀵瑰鎺ュ彛/
+      鍐呴儴鏁版嵁缁撴瀯/渚濊禆/澶辫触妯″紡锛夈€傚厛璇婚渶姹備笌鐜版湁浠ｇ爜鍐嶈璁★紝鏂规鍏蜂綋鍒板彟涓€鍚嶅伐绋嬪笀鏃犻渶鍐嶅仛
+      璁捐鍐崇瓥鍗冲彲瀹炵幇銆?
+      璁捐鏂囨。鍐欏叆 docs/design.md锛堟ā鏉夸互鏈樁娈典换鍔℃寚浠や负鍑嗭級锛岀敤 todo_write 璺熻釜璁捐鏉＄洰锛?      瀵圭敤鎴锋嫢鏈夌殑鎶€鏈€夊瀷鎴栧彇鑸嶆涔夌敤 ask_user_question 婢勬竻锛屼笉瑕佺紪鍐欏疄鐜颁唬鐮併€?
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
 
@@ -31,3 +26,16 @@
   name: '@deepseek-ai/dsh-tool-todo'
   config:
     allowParallelInProgress: true
+
+- id: mcp-standards
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: standards-design
+    transport: stdio
+    command: python
+    args:
+      - '-u'
+      - !!js process.env.DSH_STANDARDS_SERVER || 'D:/ccn-work/src/github/deepseek-harness-delivery/mcp/standards_server.py'
+    env: {}
+    cwd: ''
+    failOnStartupError: false
