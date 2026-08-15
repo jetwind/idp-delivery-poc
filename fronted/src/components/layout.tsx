@@ -58,6 +58,7 @@ const navGroups = [
     items: [
       { to: '/agents', label: '数字员工', icon: Bot },
       { to: '/knowledge', label: '知识库', icon: BookOpen },
+      { to: '/standards', label: '标准与规范', icon: FileStack },
     ],
   },
 ]
@@ -191,7 +192,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
 function crumbMap(path: string): string {
   const map: [RegExp, string][] = [
-    [/^\/cockpit/, 'AI 驾驶舱'], [/^\/agents/, '数字员工中心'], [/^\/knowledge/, '知识库管理'], [/^\/metrics/, '度量中心'],
+    [/^\/cockpit/, 'AI 驾驶舱'], [/^\/agents/, '数字员工中心'], [/^\/knowledge/, '知识库管理'], [/^\/metrics/, '度量中心'], [/^\/standards/, '标准与规范'],
     [/^\/projects$/, '项目与产品'], [/^\/projects\/new/, '创建项目'],
     [/^\/projects\/p1$/, '项目概览'], [/members/, '项目成员'], [/assets/, '工程资产'],
     [/delivery/, '交付总览'], [/flow/, 'AI 流水线'], [/context/, '项目上下文'], [/specs\/req/, '规格详情 · 需求规格'], [/specs\/design/, '规格详情 · 设计规格'], [/specs\/api/, '规格详情 · 接口规格'], [/specs\/test/, '规格详情 · 测试验收规格'], [/specs\/release/, '规格详情 · 发布交付规格'],

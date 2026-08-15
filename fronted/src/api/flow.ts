@@ -163,3 +163,46 @@ export function resumeFlow(threadId: string, answer: unknown): Promise<FlowSnaps
 export function getStages(): Promise<{ id: string; name: string }[]> {
   return flowJson('/flow/stages')
 }
+
+// ---- standards 管理（阶段标准文件 CRUD，后台 UI 维护，经 MCP 给 harness）----
+
+export interface StandardsStage {
+  stage: string
+  name: string
+  files: string[]
+}
+
+export interface StandardsTree {
+  stages: StandardsStage[]
+}
+
+export interface StandardFile {
+  stage: string
+  name: string
+  content: string
+}
+
+/** 各阶段标准文件清单。 */
+export function getStandardsTree(): Promise<StandardsTree> {
+  return flowJson('/standards/tree')
+}
+
+/** 读某标准文件内容。 */
+export function readStandard(stage: string, name: string): Promise<StandardFile> {
+  return flowJson(`/standards/file?stage=${encodeURIComponent(stage)}&name=${encodeURIComponent(name)}`)
+}
+
+/** 写/更新某标准文件内容。 */
+export function writeStandard(stage: string, name: string, content: string): Promise<{ ok: boolean }> {
+  return flowJson(`/standards/file?stage=${encodeURIComponent(stage)}&name=${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  })
+}
+
+/** 删除某标准文件。 */
+export function deleteStandard(stage: string, name: string): Promise<{ ok: boolean }> {
+  return flowJson(`/standards/file?stage=${encodeURIComponent(stage)}&name=${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
+}

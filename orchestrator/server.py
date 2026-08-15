@@ -358,6 +358,74 @@ async def stages() -> list[dict[str, Any]]:
     return [{"id": s["id"], "name": s["name"]} for s in STAGES]
 
 
+# ---- standards 管理（阶段标准文件 CRUD，供后台 UI 维护，经 MCP 给 harness）----
+
+_STAGE_IDS = [s["id"] for s in STAGES]
+
+
+def _standards_dir(stage: str) -> str:
+    return os.path.join(DELIVERY_ROOT, "standards", stage)
+
+
+def _check_stage(stage: str) -> None:
+    if stage not in _STAGE_IDS:
+        raise HTTPException(status_code=400, detail=f"未知阶段：{stage}，可用：{', '.join(_STAGE_IDS)}")
+
+
+def _check_name(name: str) -> None:
+    if not name.endswith(".md") or name in (".", "..") or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail=f"非法文件名：{name}（须以 .md 结尾，不含路径分隔符）")
+
+
+@app.get("/standards/tree")
+async def standards_tree() -> dict[str, Any]:
+    """各阶段标准文件清单（供管理 UI 渲染目录树）。"""
+    result = []
+    for s in STAGES:
+        d = _standards_dir(s["id"])
+        files = sorted(f for f in os.listdir(d) if f.endswith(".md")) if os.path.isdir(d) else []
+        result.append({"stage": s["id"], "name": s["name"], "files": files})
+    return {"stages": result}
+
+
+@app.get("/standards/file")
+async def standards_read(stage: str, name: str) -> dict[str, Any]:
+    _check_stage(stage)
+    _check_name(name)
+    path = os.path.join(_standards_dir(stage), name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"文件不存在：{stage}/{name}")
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+    return {"stage": stage, "name": name, "content": content}
+
+
+class StandardsWriteRequest(BaseModel):
+    content: str
+
+
+@app.put("/standards/file")
+async def standards_write(stage: str, name: str, req: StandardsWriteRequest) -> dict[str, Any]:
+    _check_stage(stage)
+    _check_name(name)
+    d = _standards_dir(stage)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, name), "w", encoding="utf-8", newline="\n") as f:
+        f.write(req.content)
+    return {"stage": stage, "name": name, "ok": True}
+
+
+@app.delete("/standards/file")
+async def standards_delete(stage: str, name: str) -> dict[str, Any]:
+    _check_stage(stage)
+    _check_name(name)
+    path = os.path.join(_standards_dir(stage), name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"文件不存在：{stage}/{name}")
+    os.remove(path)
+    return {"stage": stage, "name": name, "ok": True}
+
+
 if __name__ == "__main__":
     import uvicorn
 

@@ -12,6 +12,7 @@ import SpecList from '@/pages/SpecList'
 import SpecDetail from '@/pages/SpecDetail'
 import WorkflowPage from '@/pages/WorkflowPage'
 import FlowPage from '@/pages/FlowPage'
+import StandardsManagePage from '@/pages/StandardsManagePage'
 import AITaskDetail from '@/pages/AITaskDetail'
 import CompletionPage from '@/pages/CompletionPage'
 import GatePage from '@/pages/GatePage'
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="/agents" element={<AgentsCenter />} />
         <Route path="/knowledge" element={<KnowledgeCenter />} />
         <Route path="/metrics" element={<MetricsCenter />} />
+        <Route path="/standards" element={<StandardsManagePage />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>
     </AppLayout>
