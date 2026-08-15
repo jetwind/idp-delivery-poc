@@ -1,15 +1,18 @@
 """FastAPI 编排服务：把 LangGraph 流水线暴露成 HTTP API 给前端。
 
-端点：
-- POST /flow/start  启动流水线（输入需求文本 + 工作目录），跑到第一个 gate/question 暂停。
-- GET  /flow/state/{thread_id}  读当前阶段 + 待处理的 interrupt（gate 或 question）。
-- POST /flow/resume/{thread_id}  回答 question 或给出 gate 决策，继续推进。
+端点（异步模型：start/resume 立即返回，图在后台 asyncio.Task 里跑）：
+- POST /flow/start  启动流水线（输入需求文本 + 工作目录），返回 thread_id。
+- GET  /flow/state/{thread_id}  读当前阶段 + 待处理的 interrupt（gate/question/approval）。
+- GET  /flow/events/{thread_id}?since=seq  当前阶段 session 的增量事件流（实时日志）。
+- POST /flow/resume/{thread_id}  回答 question 或给出 gate/approval 决策，继续推进。
 
-前端轮询 state 拿「当前阶段 + 待人工处理项」，处理完调 resume。
+前端轮询 state（阶段/待处理项）+ events（实时日志）。
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import subprocess
 import uuid
@@ -32,6 +35,19 @@ app.add_middleware(
 )
 client = HarnessClient()
 graph = build_graph(client)
+
+# 后台图执行任务（thread_id → asyncio.Task）+ 图运行错误（thread_id → str）。
+_flow_tasks: dict[str, asyncio.Task] = {}
+_flow_errors: dict[str, str] = {}
+
+
+async def _run_flow(thread_id: str, input_: Any, config: dict[str, Any]) -> None:
+    """后台跑图：跑到下一个 interrupt 后返回；异常记入 _flow_errors，由快照透出。"""
+    try:
+        await graph.ainvoke(input_, config=config)
+    except Exception as exc:  # noqa: BLE001 - 图错误透传给前端排查
+        _flow_errors[thread_id] = str(exc)
+
 
 # 交付文件夹根目录（orchestrator/ 的上一级），git URL clone 到这里下的 projects/。
 DELIVERY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -92,6 +108,87 @@ def _resolve_cwd(raw: str) -> str:
     )
 
 
+def _text_of(content: Any) -> str:
+    """从 content 块数组里抽纯文本（user/assistant 消息）。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(p for p in parts if p)
+    return ""
+
+
+def _brief(value: Any, limit: int = 400) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        s = value
+    else:
+        try:
+            s = json.dumps(value, ensure_ascii=False)
+        except Exception:
+            s = str(value)
+    return s[:limit] + ("…" if len(s) > limit else "")
+
+
+def _extract_nested_text(value: Any, limit: int = 600) -> str:
+    """递归抽 tool result 里的文本（结构可能是 Anthropic 式嵌套 content）。"""
+    parts: list[str] = []
+
+    def walk(v: Any) -> None:
+        if sum(len(p) for p in parts) >= limit:
+            return
+        if isinstance(v, str):
+            parts.append(v)
+        elif isinstance(v, dict):
+            if v.get("type") == "text" and isinstance(v.get("text"), str):
+                parts.append(v["text"])
+            else:
+                for x in v.values():
+                    walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+
+    walk(value)
+    return _brief("".join(parts), limit)
+
+
+def _summarize_event(entry: Any) -> dict[str, Any] | None:
+    """把 session.history 的一条事件压成前端可渲染的轻量结构；跳过 token 级 chunk。"""
+    if not isinstance(entry, dict):
+        return None
+    event = entry.get("event")
+    if not isinstance(event, dict):
+        return None
+    etype = event.get("type")
+    seq = event.get("seq")
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    if etype == "user/message":
+        source = None
+        src = data.get("source")
+        if isinstance(src, dict):
+            source = src.get("kind")
+        return {"seq": seq, "type": "user", "text": _brief(_text_of(data.get("content")), 2000), "source": source}
+    if etype == "assistant/message":
+        msg = data.get("message") if isinstance(data.get("message"), dict) else {}
+        return {"seq": seq, "type": "assistant", "text": _brief(_text_of(msg.get("content")), 2000)}
+    if etype == "tool/call":
+        return {"seq": seq, "type": "tool", "toolName": data.get("name") or "?", "input": _brief(data.get("arguments"), 400)}
+    if etype == "tool/result":
+        ok = data.get("ok")
+        text = _extract_nested_text(data.get("message")) if data.get("message") else ""
+        if not text and data.get("error"):
+            text = _brief(data.get("error"), 600)
+        return {"seq": seq, "type": "tool_result", "ok": ok is not False, "text": text}
+    return None
+
+
 class StartRequest(BaseModel):
     requirement_text: str
     cwd: str
@@ -123,6 +220,9 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
         "done": stage_index >= len(STAGES),
         "pending": pending,
         "artifacts": values.get("artifacts", {}),
+        "current_session_id": values.get("current_session_id"),
+        "cwd": values.get("cwd"),
+        "error": _flow_errors.get(thread_id),
     }
 
 
@@ -136,7 +236,8 @@ async def start(req: StartRequest) -> dict[str, Any]:
         "stage_index": 0,
         "artifacts": {},
     }
-    await graph.ainvoke(initial, config=_config(thread_id))
+    _flow_errors.pop(thread_id, None)
+    _flow_tasks[thread_id] = asyncio.create_task(_run_flow(thread_id, initial, _config(thread_id)))
     return await _snapshot(thread_id)
 
 
@@ -145,17 +246,40 @@ async def state(thread_id: str) -> dict[str, Any]:
     return await _snapshot(thread_id)
 
 
+@app.get("/flow/events/{thread_id}")
+async def events(thread_id: str) -> dict[str, Any]:
+    """当前阶段 session 的最近事件流（供前端轮询渲染实时日志）。
+
+    返回完整尾页，每条事件带 session_id + stage；前端按 (session_id, seq) 去重，
+    从而跨阶段（每阶段一个新 session，seq 各自从 0 起）也能正确累积。
+    """
+    snap = await graph.aget_state(_config(thread_id))
+    values = snap.values or {}
+    session_id = values.get("current_session_id")
+    stage_index = values.get("stage_index", 0)
+    stage = STAGES[stage_index]["name"] if stage_index < len(STAGES) else "完成"
+    if not session_id:
+        return {"thread_id": thread_id, "session_id": None, "running": False, "stage": stage, "events": []}
+    running = await client.session_running(session_id)
+    history = await client.session_history(session_id, max_messages=60)
+    items: list[dict[str, Any]] = []
+    for entry in history.get("events", []):
+        summarized = _summarize_event(entry)
+        if summarized:
+            summarized["session_id"] = session_id
+            summarized["stage"] = stage
+            items.append(summarized)
+    items.sort(key=lambda e: e.get("seq") or 0)
+    return {"thread_id": thread_id, "session_id": session_id, "running": running, "stage": stage, "events": items}
+
+
 @app.post("/flow/resume/{thread_id}")
 async def resume(thread_id: str, req: ResumeRequest) -> dict[str, Any]:
-    """同步 resume：推进图到下一个 interrupt，返回该 interrupt 的快照。
-
-    会阻塞到下一个 gate/question（agent 跑几分钟），所以前端必须直连本服务
-    （带 CORS），不要走 Vite proxy（其长连接会被中间层断开）。
-    """
-    try:
-        await graph.ainvoke(Command(resume=req.answer), config=_config(thread_id))
-    except Exception as exc:  # noqa: BLE001 - 把图错误透传给前端排查
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    """异步 resume：后台推进图到下一个 interrupt，前端轮询 state/events。"""
+    _flow_errors.pop(thread_id, None)
+    _flow_tasks[thread_id] = asyncio.create_task(
+        _run_flow(thread_id, Command(resume=req.answer), _config(thread_id)),
+    )
     return await _snapshot(thread_id)
 
 

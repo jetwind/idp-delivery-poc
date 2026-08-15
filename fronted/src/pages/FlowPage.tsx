@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getFlowState, resumeFlow, startFlow, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt } from '@/api/flow'
+import { getFlowEvents, getFlowState, resumeFlow, startFlow, type FlowEvent, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt } from '@/api/flow'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert } from 'lucide-react'
+import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare } from 'lucide-react'
 
 const STAGES = [
   { id: 'requirements', name: '需求分析' },
@@ -24,7 +24,11 @@ export default function FlowPage() {
   const [error, setError] = useState<string | null>(null)
   const [answers, setAnswers] = useState<Record<string, string[]>>({})
   const [customs, setCustoms] = useState<Record<string, string>>({})
+  const [logs, setLogs] = useState<FlowEvent[]>([])
+  const [running, setRunning] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const seenRef = useRef<Set<string>>(new Set())
+  const logRef = useRef<HTMLDivElement | null>(null)
 
   const stopPolling = useCallback(() => {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
@@ -32,13 +36,22 @@ export default function FlowPage() {
 
   useEffect(() => () => stopPolling(), [stopPolling])
 
-  // 启动后轮询状态。
+  // 启动后轮询状态 + 实时日志。
   useEffect(() => {
     if (!threadId) return
     const tick = async () => {
       try {
-        const snap = await getFlowState(threadId)
+        const [snap, ev] = await Promise.all([getFlowState(threadId), getFlowEvents(threadId)])
         setSnapshot(snap)
+        if (snap.error) setError(snap.error)
+        setRunning(ev.running)
+        const fresh = ev.events.filter(e => {
+          const key = `${e.session_id ?? '?'}:${e.seq}`
+          if (seenRef.current.has(key)) return false
+          seenRef.current.add(key)
+          return true
+        })
+        if (fresh.length) setLogs(prev => [...prev, ...fresh])
         if (snap.done && snap.pending === null) stopPolling()
       } catch { /* 单次轮询失败不断流 */ }
     }
@@ -46,6 +59,11 @@ export default function FlowPage() {
     timerRef.current = setInterval(tick, 2000)
     return stopPolling
   }, [threadId, stopPolling])
+
+  // 日志自动滚到底部。
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logs])
 
   async function handleStart() {
     if (!requirement.trim() || !cwd.trim()) return
@@ -72,8 +90,8 @@ export default function FlowPage() {
     })
     setBusy(true); setError(null)
     try {
-      const snap = await resumeFlow(threadId!, payload)
-      setSnapshot(snap)
+      await resumeFlow(threadId!, payload)
+      setSnapshot(s => s ? { ...s, pending: null } : s)
       setAnswers({}); setCustoms({})
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -85,8 +103,8 @@ export default function FlowPage() {
   async function submitGate(decision: 'approve' | 'reject') {
     setBusy(true); setError(null)
     try {
-      const snap = await resumeFlow(threadId!, decision)
-      setSnapshot(snap)
+      await resumeFlow(threadId!, decision)
+      setSnapshot(s => s ? { ...s, pending: null } : s)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -97,8 +115,8 @@ export default function FlowPage() {
   async function submitApproval(outcome: 'allowed-once' | 'rejected') {
     setBusy(true); setError(null)
     try {
-      const snap = await resumeFlow(threadId!, outcome)
-      setSnapshot(snap)
+      await resumeFlow(threadId!, outcome)
+      setSnapshot(s => s ? { ...s, pending: null } : s)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -109,6 +127,7 @@ export default function FlowPage() {
   function reset() {
     stopPolling()
     setThreadId(null); setSnapshot(null); setError(null); setAnswers({}); setCustoms({})
+    setLogs([]); setRunning(false); seenRef.current = new Set()
   }
 
   const pending = snapshot?.pending ?? null
@@ -176,6 +195,27 @@ export default function FlowPage() {
       {error && (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
           <TriangleAlert className="w-3.5 h-3.5 shrink-0" />{error}
+        </div>
+      )}
+
+      {/* 实时日志 */}
+      {threadId && (
+        <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-slate-500" />
+              <span className="text-[13px] font-semibold text-slate-800">运行日志</span>
+              {running && <Pill tone="blue" dot>运行中</Pill>}
+              {logs.length > 0 && <span className="text-xs text-slate-400">{logs.length} 条</span>}
+            </div>
+          </div>
+          <div ref={logRef} className="px-5 py-3 max-h-[420px] overflow-y-auto space-y-1.5">
+            {logs.length === 0 ? (
+              <div className="text-xs text-slate-400">启动中，等待 agent 产出…</div>
+            ) : (
+              logs.map((e, i) => <LogItem key={i} e={e} />)
+            )}
+          </div>
         </div>
       )}
 
@@ -343,6 +383,52 @@ function QuestionItem({ item, selected, custom, onSelect, onCustom }: {
           className="mt-2 w-full h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400"
         />
       )}
+    </div>
+  )
+}
+
+function LogItem({ e }: { e: FlowEvent }) {
+  const base = 'flex items-start gap-2 text-xs leading-5 py-0.5'
+  if (e.type === 'tool') {
+    return (
+      <div className={base}>
+        <Wrench className="w-3.5 h-3.5 mt-0.5 text-indigo-500 shrink-0" />
+        <div className="min-w-0">
+          <span className="font-medium text-slate-600">工具调用</span>
+          <code className="ml-2 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono">{e.toolName}</code>
+          {e.input && <span className="ml-1 text-slate-400 break-all">{e.input}</span>}
+        </div>
+      </div>
+    )
+  }
+  if (e.type === 'tool_result') {
+    return (
+      <div className={base}>
+        {e.ok === false
+          ? <XCircle className="w-3.5 h-3.5 mt-0.5 text-rose-500 shrink-0" />
+          : <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 text-emerald-500 shrink-0" />}
+        <div className="min-w-0">
+          <span className="font-medium text-slate-500">结果</span>
+          {e.text && <span className="ml-2 text-slate-500 break-all">{e.text}</span>}
+        </div>
+      </div>
+    )
+  }
+  if (e.type === 'assistant') {
+    return (
+      <div className={base}>
+        <Bot className="w-3.5 h-3.5 mt-0.5 text-violet-500 shrink-0" />
+        <div className="min-w-0 whitespace-pre-wrap text-slate-700 break-words">{e.text}</div>
+      </div>
+    )
+  }
+  return (
+    <div className={base}>
+      <MessageSquare className="w-3.5 h-3.5 mt-0.5 text-slate-400 shrink-0" />
+      <div className="min-w-0">
+        <span className="text-slate-400">{e.source === 'user' ? '输入' : '上下文'}</span>
+        <div className="text-slate-600 whitespace-pre-wrap break-words">{e.text}</div>
+      </div>
     </div>
   )
 }

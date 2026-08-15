@@ -17,6 +17,11 @@ export default defineConfig({
   plugins: [inspectAttr(), react()],
   server: {
     port: 3000,
+    watch: {
+      // 编辑工具用「临时目录 + 原子改名」写文件，chokidar 在 Windows 上 watch
+      // 这些临时文件会 EBUSY 崩溃；忽略掉它们（含前导点的隐藏临时目录）。
+      ignored: (path: string) => path.includes('node_modules') || path.includes('.tmpdir') || path.endsWith('.tmp'),
+    },
     proxy: {
       '/api': {
         target: DSH_BACKEND,

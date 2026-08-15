@@ -1,8 +1,9 @@
 /**
  * LangGraph 编排服务（orchestrator/，FastAPI 8080）的 transport 层。
  *
- * 前端通过 Vite 同源代理 `/flow` 访问。流水线是「启动 → 轮询状态 → 处理 pending
- * interrupt（question 回答 / gate 决策）→ resume」的循环。
+ * 前端直连编排服务（带 CORS）。流水线是「启动 → 轮询 state + events → 处理
+ * pending interrupt（question 回答 / gate 决策 / approval）→ resume」的循环。
+ * start/resume 已异步化（立即返回），图在后台跑。
  */
 
 /** question interrupt 里的单个问题。 */
@@ -47,10 +48,37 @@ export interface FlowSnapshot {
   pending: FlowPending | null
   /** 每阶段产出的文件清单（阶段 id → 文件路径列表）。 */
   artifacts: Record<string, string[]>
+  /** 当前阶段 agent 会话 id（用于拉取实时日志）。 */
+  current_session_id: string | null
+  /** 已解析的工作目录（本地绝对路径）。 */
+  cwd: string | null
+  /** 后台图运行错误（有则显示）。 */
+  error: string | null
 }
 
-// 编排服务直连（带 CORS），不走 Vite proxy：/flow/start 和 /flow/resume 会
-// 同步阻塞几分钟（agent 跑），Vite proxy 的长连接会被中间层断开。
+/** 一条实时活动日志（由编排层从 session.history 摘要而来）。 */
+export interface FlowEvent {
+  seq: number
+  type: 'user' | 'assistant' | 'tool' | 'tool_result'
+  session_id?: string
+  stage?: string
+  text?: string
+  toolName?: string
+  input?: string
+  ok?: boolean
+  source?: string | null
+}
+
+export interface FlowEvents {
+  thread_id: string
+  session_id: string | null
+  running: boolean
+  stage: string
+  events: FlowEvent[]
+}
+
+// 编排服务直连（带 CORS）。/flow/start、/flow/resume 已异步化（立即返回），
+// 前端轮询 /flow/state（阶段/待处理项）与 /flow/events（实时日志）。
 const FLOW_BASE = 'http://localhost:8080'
 
 async function flowJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -84,9 +112,14 @@ export function getFlowState(threadId: string): Promise<FlowSnapshot> {
   return flowJson(`/flow/state/${threadId}`)
 }
 
+/** 读当前阶段 session 的最近事件流（实时日志）。 */
+export function getFlowEvents(threadId: string): Promise<FlowEvents> {
+  return flowJson(`/flow/events/${threadId}`)
+}
+
 /**
- * resume：回答 question（[{id, selected, custom?}]）或给出 gate 决策（"approve"/"reject"）。
- * 同步推进到下一个 interrupt，返回新快照（阻塞几分钟，前端 await）。
+ * resume：回答 question（[{id, selected, custom?}]）、给出 gate 决策（"approve"/"reject"）
+ * 或 approval 决策（"allowed-once"/"rejected"）。异步推进到下一个 interrupt（立即返回）。
  */
 export function resumeFlow(threadId: string, answer: unknown): Promise<FlowSnapshot> {
   return flowJson(`/flow/resume/${threadId}`, {
