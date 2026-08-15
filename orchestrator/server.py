@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import uuid
 from typing import Any
 
@@ -30,6 +32,64 @@ app.add_middleware(
 )
 client = HarnessClient()
 graph = build_graph(client)
+
+# 交付文件夹根目录（orchestrator/ 的上一级），git URL clone 到这里下的 projects/。
+DELIVERY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_GIT_URL_PREFIXES = ("http://", "https://", "git@", "ssh://", "git://")
+
+
+def _is_git_url(value: str) -> bool:
+    return value.startswith(_GIT_URL_PREFIXES) or value.endswith(".git")
+
+
+def _resolve_cwd(raw: str) -> str:
+    """把用户输入的工作目录解析成本地绝对目录。
+
+    - 已是本地目录（绝对路径，或相对交付根/进程 cwd）→ 原样返回绝对路径。
+    - git 仓库 URL → clone 到 <交付根>/projects/<repo>，返回本地路径（幂等：已 clone 则复用）。
+    - 其它 → 400，提示填本地目录或 git URL。
+    """
+    value = raw.strip().strip('"').strip("'")
+    if not value:
+        raise HTTPException(status_code=400, detail="工作目录（cwd）不能为空。")
+    for candidate in (value, os.path.join(DELIVERY_ROOT, value)):
+        if os.path.isdir(candidate):
+            return os.path.abspath(candidate)
+    if _is_git_url(value):
+        repo_name = value.rstrip("/").rsplit("/", 1)[-1]
+        if repo_name.endswith(".git"):
+            repo_name = repo_name[:-4]
+        if not repo_name:
+            raise HTTPException(status_code=400, detail=f"无法从 URL 推断仓库名：{value}")
+        projects_root = os.path.join(DELIVERY_ROOT, "projects")
+        os.makedirs(projects_root, exist_ok=True)
+        target = os.path.join(projects_root, repo_name)
+        if not os.path.isdir(os.path.join(target, ".git")):
+            proc = subprocess.run(
+                ["git", "clone", value, target],
+                capture_output=True, text=True,
+            )
+            if proc.returncode != 0:
+                detail = (proc.stderr or proc.stdout or "").strip()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"git clone 失败：{detail[:500] or '未知错误'}（URL：{value}）",
+                )
+        # 去标识：clone 出来的仓库用 jetwind 身份提交，覆盖可能存在的全局用户身份。
+        subprocess.run(["git", "-C", target, "config", "user.name", "jetwind"], check=False)
+        subprocess.run(
+            ["git", "-C", target, "config", "user.email", "jetwind@users.noreply.github.com"],
+            check=False,
+        )
+        return os.path.abspath(target)
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "工作目录（cwd）必须是本地已存在的目录或可 clone 的 git 仓库 URL。"
+            f"收到：{value!r}。"
+            "本地示例：D:\\ccn-work\\src\\github\\deepseek-harness-delivery\\examples\\project-delivery"
+        ),
+    )
 
 
 class StartRequest(BaseModel):
@@ -69,9 +129,10 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
 @app.post("/flow/start")
 async def start(req: StartRequest) -> dict[str, Any]:
     thread_id = str(uuid.uuid4())
+    cwd = _resolve_cwd(req.cwd)
     initial: dict[str, Any] = {
         "requirement_text": req.requirement_text,
-        "cwd": req.cwd,
+        "cwd": cwd,
         "stage_index": 0,
         "artifacts": {},
     }

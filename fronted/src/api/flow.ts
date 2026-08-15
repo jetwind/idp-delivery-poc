@@ -60,7 +60,13 @@ async function flowJson<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`编排服务失败（${path}）：HTTP ${res.status}${text ? ` ${text}` : ''}`)
+    let detail = text
+    try {
+      const parsed = JSON.parse(text)
+      if (typeof parsed.detail === 'string') detail = parsed.detail
+      else if (Array.isArray(parsed.detail)) detail = parsed.detail.map((d: any) => d.msg ?? JSON.stringify(d)).join('; ')
+    } catch { /* 非 JSON 时用原文 */ }
+    throw new Error(`编排服务失败（${path}）：HTTP ${res.status}${detail ? ` ${detail}` : ''}`)
   }
   return res.json() as Promise<T>
 }

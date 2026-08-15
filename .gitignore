@@ -20,6 +20,9 @@ __pycache__/
 .venv/
 venv/
 
+# git URL clone 出来的交付项目（编排层 _resolve_cwd 生成）
+projects/
+
 # 编辑器 / 系统
 .vscode/
 .idea/
