@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getFlowEvents, getFlowState, resumeFlow, startFlow, type FlowEvent, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt } from '@/api/flow'
+import { getFlowEvents, getFlowFile, getFlowFiles, getFlowState, resumeFlow, startFlow, type FlowEvent, type FlowFile, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt } from '@/api/flow'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare } from 'lucide-react'
+import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare, Folder } from 'lucide-react'
 
 const STAGES = [
   { id: 'requirements', name: '需求分析' },
@@ -219,6 +219,9 @@ export default function FlowPage() {
         </div>
       )}
 
+      {/* 工作区文件浏览器 */}
+      {threadId && <FileBrowser threadId={threadId} />}
+
       {/* 运行状态 */}
       {threadId && snapshot && (
         <div className="space-y-4">
@@ -428,6 +431,100 @@ function LogItem({ e }: { e: FlowEvent }) {
       <div className="min-w-0">
         <span className="text-slate-400">{e.source === 'user' ? '输入' : '上下文'}</span>
         <div className="text-slate-600 whitespace-pre-wrap break-words">{e.text}</div>
+      </div>
+    </div>
+  )
+}
+
+function FileBrowser({ threadId }: { threadId: string }) {
+  const [files, setFiles] = useState<FlowFile[]>([])
+  const [selected, setSelected] = useState<string | null>(null)
+  const [content, setContent] = useState('')
+  const [truncated, setTruncated] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const r = await getFlowFiles(threadId)
+        if (alive) setFiles(r.files)
+      } catch { /* 忽略单次失败 */ }
+    }
+    load()
+    const t = setInterval(load, 3000)
+    return () => { alive = false; clearInterval(t) }
+  }, [threadId])
+
+  async function open(path: string) {
+    setSelected(path); setLoading(true); setErr(null)
+    try {
+      const r = await getFlowFile(threadId, path)
+      setContent(r.content); setTruncated(r.truncated)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e)); setContent('')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const groups = new Map<string, FlowFile[]>()
+  for (const f of files) {
+    const top = f.path.split('/')[0] || '(root)'
+    if (!groups.has(top)) groups.set(top, [])
+    groups.get(top)!.push(f)
+  }
+  const topDirs = [...groups.keys()].sort()
+
+  return (
+    <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-slate-500" />
+          <span className="text-[13px] font-semibold text-slate-800">工作区文件</span>
+          {files.length > 0 && <span className="text-xs text-slate-400">{files.length} 个文件</span>}
+        </div>
+      </div>
+      <div className="flex min-h-[240px] max-h-[440px]">
+        <div className="w-[264px] shrink-0 border-r border-slate-100 overflow-y-auto p-2">
+          {files.length === 0 ? (
+            <div className="text-xs text-slate-400 px-2 py-2">尚无文件（agent 还未产出）</div>
+          ) : (
+            topDirs.map(dir => (
+              <div key={dir} className="mb-1">
+                <div className="px-2 py-1 text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+                  <Folder className="w-3 h-3" />{dir}/
+                </div>
+                {groups.get(dir)!.map(f => {
+                  const name = dir === '(root)' ? f.path : f.path.slice(dir.length + 1)
+                  const active = selected === f.path
+                  return (
+                    <button key={f.path} onClick={() => open(f.path)}
+                      className={cn('w-full text-left px-4 py-1 rounded text-xs font-mono truncate block',
+                        active ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50')}>
+                      {name}
+                    </button>
+                  )
+                })}
+              </div>
+            ))
+          )}
+        </div>
+        <div className="flex-1 min-w-0 overflow-y-auto bg-slate-50/50 p-3">
+          {loading ? (
+            <div className="text-xs text-slate-400">加载中…</div>
+          ) : err ? (
+            <div className="text-xs text-rose-500">{err}</div>
+          ) : selected ? (
+            <div>
+              <div className="text-xs font-mono text-slate-500 mb-2">{selected}{truncated ? '（内容过长已截断）' : ''}</div>
+              <pre className="text-xs font-mono text-slate-700 whitespace-pre-wrap break-words">{content}</pre>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-400">点击左侧文件预览内容</div>
+          )}
+        </div>
       </div>
     </div>
   )

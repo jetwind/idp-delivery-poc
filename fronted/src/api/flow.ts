@@ -77,6 +77,24 @@ export interface FlowEvents {
   events: FlowEvent[]
 }
 
+/** 工作区里的一个文件（相对 cwd 的路径）。 */
+export interface FlowFile {
+  path: string
+  size: number
+}
+
+export interface FlowFiles {
+  thread_id: string
+  cwd: string | null
+  files: FlowFile[]
+}
+
+export interface FlowFileContent {
+  path: string
+  content: string
+  truncated: boolean
+}
+
 // 编排服务直连（带 CORS）。/flow/start、/flow/resume 已异步化（立即返回），
 // 前端轮询 /flow/state（阶段/待处理项）与 /flow/events（实时日志）。
 const FLOW_BASE = 'http://localhost:8080'
@@ -115,6 +133,16 @@ export function getFlowState(threadId: string): Promise<FlowSnapshot> {
 /** 读当前阶段 session 的最近事件流（实时日志）。 */
 export function getFlowEvents(threadId: string): Promise<FlowEvents> {
   return flowJson(`/flow/events/${threadId}`)
+}
+
+/** 列举工作目录下的文件清单。 */
+export function getFlowFiles(threadId: string): Promise<FlowFiles> {
+  return flowJson(`/flow/files/${threadId}`)
+}
+
+/** 读取工作目录下某个文件的内容。 */
+export function getFlowFile(threadId: string, path: string): Promise<FlowFileContent> {
+  return flowJson(`/flow/file/${threadId}?path=${encodeURIComponent(path)}`)
 }
 
 /**

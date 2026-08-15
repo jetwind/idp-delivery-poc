@@ -189,6 +189,53 @@ def _summarize_event(entry: Any) -> dict[str, Any] | None:
     return None
 
 
+_EXCLUDE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".idea", ".vscode", "coverage"}
+_EXCLUDE_EXTS = {".pyc", ".class", ".log", ".lock", ".png", ".jpg", ".jpeg", ".gif", ".ico",
+                 ".woff", ".woff2", ".ttf", ".eot", ".svg", ".map", ".tsbuildinfo"}
+
+
+def _list_files(cwd: str, limit: int = 500) -> list[dict[str, Any]]:
+    """列举 cwd 下的文件（相对路径），排除依赖/构建/二进制目录，按路径排序。"""
+    out: list[dict[str, Any]] = []
+    for root, dirs, names in os.walk(cwd):
+        dirs[:] = [d for d in dirs if d not in _EXCLUDE_DIRS and not d.endswith(".tmpdir")]
+        for name in names:
+            if os.path.splitext(name)[1].lower() in _EXCLUDE_EXTS:
+                continue
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, cwd).replace("\\", "/")
+            try:
+                size = os.path.getsize(full)
+            except OSError:
+                size = 0
+            out.append({"path": rel, "size": size})
+            if len(out) >= limit:
+                out.sort(key=lambda x: x["path"])
+                return out
+    out.sort(key=lambda x: x["path"])
+    return out
+
+
+def _read_file_safe(cwd: str, path: str, max_bytes: int = 200_000) -> tuple[str, bool]:
+    """安全读取 cwd 下的文本文件（防路径逃逸），返回 (content, truncated)。"""
+    rel = path.replace("\\", "/").lstrip("/")
+    cwd_abs = os.path.abspath(cwd)
+    full = os.path.abspath(os.path.join(cwd_abs, rel))
+    if full != cwd_abs and not full.startswith(cwd_abs + os.sep):
+        raise HTTPException(status_code=400, detail="非法路径")
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=404, detail=f"文件不存在：{rel}")
+    try:
+        with open(full, encoding="utf-8") as f:
+            data = f.read(max_bytes + 1)
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"无法读取（二进制文件）：{rel}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"读取失败：{rel}") from exc
+    truncated = len(data) > max_bytes
+    return data[:max_bytes], truncated
+
+
 class StartRequest(BaseModel):
     requirement_text: str
     cwd: str
@@ -271,6 +318,29 @@ async def events(thread_id: str) -> dict[str, Any]:
             items.append(summarized)
     items.sort(key=lambda e: e.get("seq") or 0)
     return {"thread_id": thread_id, "session_id": session_id, "running": running, "stage": stage, "events": items}
+
+
+@app.get("/flow/files/{thread_id}")
+async def files(thread_id: str) -> dict[str, Any]:
+    """列举工作目录下的文件清单（供前端目录树）。"""
+    snap = await graph.aget_state(_config(thread_id))
+    values = snap.values or {}
+    cwd = values.get("cwd")
+    if not cwd:
+        return {"thread_id": thread_id, "cwd": None, "files": []}
+    return {"thread_id": thread_id, "cwd": cwd, "files": _list_files(cwd)}
+
+
+@app.get("/flow/file/{thread_id}")
+async def file(thread_id: str, path: str) -> dict[str, Any]:
+    """读取工作目录下某个文本文件的内容（供前端预览）。"""
+    snap = await graph.aget_state(_config(thread_id))
+    values = snap.values or {}
+    cwd = values.get("cwd")
+    if not cwd:
+        raise HTTPException(status_code=404, detail="尚未启动或工作目录未知")
+    content, truncated = _read_file_safe(cwd, path)
+    return {"path": path, "content": content, "truncated": truncated}
 
 
 @app.post("/flow/resume/{thread_id}")
