@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import tempfile
 from pathlib import Path
@@ -26,14 +27,14 @@ def check(name: str, got: list[str], expect_count: int, expect_fragment: str | N
     assert ok, f"{name} 断言失败"
 
 
-def main() -> None:
+async def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cwd = str(Path(tmp))
 
         # 04 编码：build/test 都通过。
         check(
             "coding 通过",
-            run_command_acceptance("coding", cwd, {
+            await run_command_acceptance("coding", cwd, {
                 "buildCommand": "exit 0",
                 "testCommand": "exit 0",
                 "services": ["svc"],
@@ -44,7 +45,7 @@ def main() -> None:
         # 04 编码：build 失败（退出码非 0）。
         check(
             "coding 构建失败",
-            run_command_acceptance("coding", cwd, {
+            await run_command_acceptance("coding", cwd, {
                 "buildCommand": "exit 7",
                 "testCommand": "exit 0",
                 "services": ["svc"],
@@ -56,7 +57,7 @@ def main() -> None:
         # 04 编码：命令为空。
         check(
             "coding 命令为空",
-            run_command_acceptance("coding", cwd, {
+            await run_command_acceptance("coding", cwd, {
                 "buildCommand": "",
                 "testCommand": "exit 0",
                 "services": ["svc"],
@@ -68,7 +69,7 @@ def main() -> None:
         # 05 测试：命令通过且 failed=0。
         check(
             "testing 通过",
-            run_command_acceptance("testing", cwd, {
+            await run_command_acceptance("testing", cwd, {
                 "unitTest": {"command": "exit 0", "total": 3, "passed": 3, "failed": 0},
             }),
             0,
@@ -77,7 +78,7 @@ def main() -> None:
         # 05 测试：命令通过但报告 failed>0（自报失败，不信 agent）。
         check(
             "testing 自报 failed>0",
-            run_command_acceptance("testing", cwd, {
+            await run_command_acceptance("testing", cwd, {
                 "unitTest": {"command": "exit 0", "total": 3, "passed": 1, "failed": 2},
             }),
             1,
@@ -87,7 +88,7 @@ def main() -> None:
         # 05 测试：命令本身失败。
         check(
             "testing 命令失败",
-            run_command_acceptance("testing", cwd, {
+            await run_command_acceptance("testing", cwd, {
                 "unitTest": {"command": "exit 3", "total": 3, "passed": 3, "failed": 0},
             }),
             1,
@@ -98,4 +99,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

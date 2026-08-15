@@ -20,6 +20,7 @@ import asyncio
 import json
 import os
 import subprocess
+import time
 from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -179,11 +180,28 @@ def clean_stage_title(stage: dict[str, Any]) -> str:
     return task.strip() or stage.get("name", "")
 
 
-def git_commit(cwd: str, message: str) -> bool:
+GIT_TIMEOUT_SECONDS = 60
+
+
+def _git_commit_sync(cwd: str, message: str) -> bool:
     try:
-        subprocess.run(["git", "add", "-A"], cwd=cwd, check=False, capture_output=True)
-        r = subprocess.run(["git", "commit", "-m", message], cwd=cwd, check=False, capture_output=True)
+        subprocess.run(
+            ["git", "add", "-A"], cwd=cwd, check=False, capture_output=True,
+            timeout=GIT_TIMEOUT_SECONDS, stdin=subprocess.DEVNULL,
+        )
+        r = subprocess.run(
+            ["git", "commit", "-m", message], cwd=cwd, check=False, capture_output=True,
+            timeout=GIT_TIMEOUT_SECONDS, stdin=subprocess.DEVNULL,
+        )
         return r.returncode == 0
+    except Exception:
+        return False
+
+
+async def git_commit(cwd: str, message: str) -> bool:
+    """在独立线程里跑 git，避免阻塞事件循环；带超时 + 关 stdin。"""
+    try:
+        return await asyncio.to_thread(_git_commit_sync, cwd, message)
     except Exception:
         return False
 
@@ -192,27 +210,33 @@ async def peek_pending(client: HarnessClient, session_id: str) -> dict[str, Any]
     import websockets
 
     ws_url = client.base_url.replace("http://", "ws://") + "/api/events.mux"
+    deadline = time.monotonic() + 8.0  # 整体读超时，防止 mux 帧洪泛导致死循环
     try:
-        async with websockets.connect(ws_url) as ws:
-            try:
-                while True:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=4.0)
+        async with websockets.connect(ws_url, open_timeout=5) as ws:
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=min(4.0, remaining))
+                except asyncio.TimeoutError:
+                    break
+                try:
                     frame = json.loads(raw)
-                    method = frame.get("method")
-                    if method not in ("question/requested", "approval/requested"):
-                        continue
-                    payload = frame.get("payload", {})
-                    if payload.get("sessionId") != session_id:
-                        continue
-                    if method == "question/requested":
-                        return {"kind": "question", "rpc_id": frame.get("rpcId"),
-                                "questions": payload.get("questions", [])}
-                    return {"kind": "approval", "rpc_id": frame.get("rpcId"),
-                            "approvalId": payload.get("approvalId"),
-                            "toolName": payload.get("toolName"),
-                            "reason": payload.get("reason")}
-            except asyncio.TimeoutError:
-                return None
+                except Exception:
+                    continue
+                method = frame.get("method")
+                if method not in ("question/requested", "approval/requested"):
+                    continue
+                payload = frame.get("payload", {})
+                if payload.get("sessionId") != session_id:
+                    continue
+                if method == "question/requested":
+                    return {"kind": "question", "rpc_id": frame.get("rpcId"),
+                            "questions": payload.get("questions", [])}
+                return {"kind": "approval", "rpc_id": frame.get("rpcId"),
+                        "approvalId": payload.get("approvalId"),
+                        "toolName": payload.get("toolName"),
+                        "reason": payload.get("reason")}
+            return None
     except Exception:
         return None
 
@@ -263,6 +287,9 @@ async def poll_stage(state: FlowState, client: HarnessClient) -> FlowState:
     session_id = state["current_session_id"]
     stage = STAGES[state["stage_index"]]
 
+    # 节流：每轮至少隔 1 秒，避免 agent 阻塞等待时 poll 自环空转占满事件循环。
+    await asyncio.sleep(1.0)
+
     pending = await peek_pending(client, session_id)
     if pending:
         state["pending"] = pending
@@ -281,7 +308,7 @@ async def poll_stage(state: FlowState, client: HarnessClient) -> FlowState:
         out_files.append(json_out)
     state.setdefault("artifacts", {})[stage["id"]] = out_files
     if not state.get("stage_committed"):
-        git_commit(state["cwd"], f"delivery: {stage['name']} 阶段产物")
+        await git_commit(state["cwd"], f"delivery: {stage['name']} 阶段产物")
         state["stage_committed"] = True
     return state
 
@@ -328,11 +355,12 @@ async def approval_node(state: FlowState, client: HarnessClient) -> FlowState:
 COMMAND_TIMEOUT_SECONDS = 600
 
 
-def _run_command(cwd: str, cmd: str, label: str) -> str | None:
-    """在 cwd 下运行一条命令，返回错误描述；退出码 0 返回 None。"""
+async def _run_command(cwd: str, cmd: str, label: str) -> str | None:
+    """在独立线程里运行一条命令，返回错误描述；退出码 0 返回 None。"""
     try:
-        proc = subprocess.run(
-            cmd, cwd=cwd, shell=True, capture_output=True, timeout=COMMAND_TIMEOUT_SECONDS,
+        proc = await asyncio.to_thread(
+            subprocess.run, cmd, cwd=cwd, shell=True, capture_output=True,
+            timeout=COMMAND_TIMEOUT_SECONDS, stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return f"{label}命令超时（>{COMMAND_TIMEOUT_SECONDS}s）：{cmd}"
@@ -346,7 +374,7 @@ def _run_command(cwd: str, cmd: str, label: str) -> str | None:
     return f"{label}命令退出码非 0（{proc.returncode}）：{cmd}\n输出尾部：\n{tail}"
 
 
-def run_command_acceptance(stage_id: str, cwd: str, instance: dict[str, Any]) -> list[str]:
+async def run_command_acceptance(stage_id: str, cwd: str, instance: dict[str, Any]) -> list[str]:
     """铁律 3：04/05 的「完成」由真实命令退出码判定，不信 agent 自报。
 
     - coding：运行 buildCommand + testCommand，任一退出码非 0 = 失败。
@@ -360,7 +388,7 @@ def run_command_acceptance(stage_id: str, cwd: str, instance: dict[str, Any]) ->
             if not isinstance(cmd, str) or not cmd.strip():
                 errors.append(f"{label}命令（{key}）为空")
                 continue
-            err = _run_command(cwd, cmd.strip(), label)
+            err = await _run_command(cwd, cmd.strip(), label)
             if err:
                 errors.append(err)
     elif stage_id == "testing":
@@ -372,7 +400,7 @@ def run_command_acceptance(stage_id: str, cwd: str, instance: dict[str, Any]) ->
             if not isinstance(cmd, str) or not cmd.strip():
                 errors.append("单元测试命令（unitTest.command）为空")
             else:
-                err = _run_command(cwd, cmd.strip(), "单元测试")
+                err = await _run_command(cwd, cmd.strip(), "单元测试")
                 if err:
                     errors.append(err)
             failed = unit.get("failed")
@@ -414,7 +442,7 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
 
     # schema 通过后，04/05 追加确定性命令验收（跑 build/test 命令取退出码）。
     if not errors and isinstance(instance, dict):
-        errors = run_command_acceptance(stage_id, state["cwd"], instance)
+        errors = await run_command_acceptance(stage_id, state["cwd"], instance)
 
     if not errors:
         state["validation_status"] = "passed"
