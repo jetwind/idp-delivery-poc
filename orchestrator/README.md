@@ -40,7 +40,7 @@ harness 执行层 (3086, dsh web)
 - `schema_store.py` — 阶段产物 JSON Schema 存储 + `jsonschema` Draft202012 校验。
 - `standards_store.py` — 标准/领域知识集中存储（SQLite），经 `POST /mcp`（streamable-http）给各 harness agent。
 - `config_store.py` — 各阶段数字员工的模型/思考深度/文件权限/产物验收重试次数配置。
-- `activity_store.py` — 审批（危险命令）审计落盘。
+- `activity_store.py` — 审批（危险命令）审计 + 会话任务标题（干净一句，供运行监控展示）落盘。
 - `test_flow.py` — 端到端验证（旧）；`verify_full_flow.py` — 5 阶段端到端（自动答 question + approve gate）。
 - `test_command_acceptance.py` / `test_validate_acceptance.py` — 04/05 命令验收的单测 / 集成测试（不依赖 harness）。
 

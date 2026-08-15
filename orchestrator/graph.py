@@ -166,6 +166,19 @@ def collect_input_files(state: FlowState, stage: dict[str, Any]) -> str:
     return "\n".join(chunks)
 
 
+def clean_stage_title(stage: dict[str, Any]) -> str:
+    """从阶段任务指令提炼一句完整的「任务」描述，去掉「当前处于【0X 阶段】。」前缀。"""
+    task = stage.get("task", "")
+    marker = "阶段。"
+    idx = task.find(marker)
+    if idx != -1 and task.startswith("当前处于【"):
+        task = task[idx + len(marker):]
+    end = task.find("。")
+    if end != -1:
+        task = task[:end]
+    return task.strip() or stage.get("name", "")
+
+
 def git_commit(cwd: str, message: str) -> bool:
     try:
         subprocess.run(["git", "add", "-A"], cwd=cwd, check=False, capture_output=True)
@@ -209,6 +222,10 @@ async def start_stage(state: FlowState, client: HarnessClient) -> FlowState:
     if state.get("current_session_id") is None:
         created = await client.create_session(state["cwd"], stage["preset"])
         state["current_session_id"] = created["sessionId"]
+        # 记录一句完整的「任务」标题，供运行监控展示（替代 harness 自动截断的 title）。
+        activity_store.record_session_title(
+            state["current_session_id"], clean_stage_title(stage), stage["id"],
+        )
         # 应用该阶段数字员工的模型配置（模型 + 思考深度）与文件权限；失败则回退默认，不阻断流程。
         cfg = config_store.get_config(stage["id"])
         if cfg:

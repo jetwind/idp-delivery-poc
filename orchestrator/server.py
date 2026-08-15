@@ -678,7 +678,9 @@ async def agents_activity(limit: int = 50) -> dict[str, Any]:
         if preset not in _STAGE_IDS:
             continue
         tu = (it.get("projections") or {}).get("values", {}).get("tokenUsage", {}) or {}
-        title = (it.get("projections") or {}).get("values", {}).get("title") or ""
+        # 优先用编排层记录的完整任务标题；历史/子代理 session 未记录时回退 harness 截断的 title。
+        title = activity_store.get_session_title(it.get("sessionId")) or \
+            (it.get("projections") or {}).get("values", {}).get("title") or ""
         uncached = int(tu.get("uncachedInputTokens", 0) or 0)
         cache = int(tu.get("cacheReadTokens", 0) or 0)
         output = int(tu.get("outputTokens", 0) or 0)

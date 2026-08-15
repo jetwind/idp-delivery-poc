@@ -1,6 +1,7 @@
 """数字员工运行监控 / 审计的活动记录存储（SQLite，与 standards 同库）。
 
-当前落盘「审批审计」（危险命令 approval）；运行监控用 session.list 实时聚合，不落盘。
+落盘两类：审批审计（危险命令 approval）+ 会话任务标题（编排层在创建会话时写入，
+用于运行监控里展示一句完整的「任务」描述，替代 harness 自动截断的 title）。
 """
 
 from __future__ import annotations
@@ -30,6 +31,13 @@ def init_db() -> None:
             "kind TEXT NOT NULL, "
             "detail TEXT NOT NULL, "
             "outcome TEXT NOT NULL"
+            ")",
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS session_meta ("
+            "session_id TEXT PRIMARY KEY, "
+            "title TEXT NOT NULL, "
+            "stage TEXT NOT NULL"
             ")",
         )
         conn.commit()
@@ -62,5 +70,29 @@ def list_activity(kind: str | None = None, limit: int = 100) -> list[dict]:
         else:
             rows = conn.execute("SELECT * FROM activity ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def record_session_title(session_id: str, title: str, stage: str) -> None:
+    """记录某会话的干净任务标题（编排层创建会话时写入，UPSERT）。"""
+    conn = _conn()
+    try:
+        conn.execute(
+            "INSERT INTO session_meta(session_id, title, stage) VALUES(?,?,?) "
+            "ON CONFLICT(session_id) DO UPDATE SET title=excluded.title, stage=excluded.stage",
+            (session_id, title, stage),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_session_title(session_id: str) -> str | None:
+    """读某会话的干净任务标题；未记录（如子代理 session / 历史 session）返回 None。"""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT title FROM session_meta WHERE session_id=?", (session_id,)).fetchone()
+        return row["title"] if row else None
     finally:
         conn.close()
