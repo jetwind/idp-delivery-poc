@@ -149,7 +149,7 @@ export default function FlowPage() {
     try {
       const answer = decision === 'approve' ? 'approve' : { action: 'revise', feedback: gateFeedback.trim() }
       await resumeFlow(threadId!, answer)
-      setSnapshot(s => s ? { ...s, pending: null } : s)
+      setSnapshot(s => s ? { ...s, pending: null, validation: { status: 'pending', attempts: 0, error: null } } : s)
       setGateFeedback('')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

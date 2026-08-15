@@ -505,6 +505,9 @@ async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
             "gate_action": "",
             "gate_feedback": "",
             "gate_round": 0,
+            "validation_status": "pending",
+            "validation_attempts": 0,
+            "validation_error": None,
         }
 
     # 退回：保留 session 上下文，在当前版本上增量修订（不重做、不重新澄清）。
@@ -515,6 +518,7 @@ async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
     state["stage_committed"] = False
     state["validation_status"] = "pending"
     state["validation_attempts"] = 0
+    state["validation_error"] = None
     activity_store.record_gate(state.get("current_session_id") or "", stage["name"], "revise", feedback, round_no)
     if state.get("current_session_id"):
         out_json = schema_store.STAGE_OUTPUT_JSON.get(stage["id"], "")
