@@ -227,6 +227,17 @@ async def start_stage(state: FlowState, client: HarnessClient) -> FlowState:
             prompt = prompt + "\n" + input_text
         if stage["id"] == "requirements":
             prompt = prompt + f"\n\n【用户原始需求】\n{state['requirement_text']}"
+        # 结构化产物要求：有 schema 的阶段，要求 agent 写 JSON 产物（图侧校验的正式产物）。
+        schema = schema_store.get_schema(stage["id"])
+        out_json = schema_store.STAGE_OUTPUT_JSON.get(stage["id"])
+        if schema and out_json:
+            prompt += (
+                f"\n\n【结构化产物要求】\n"
+                f"本阶段的正式产物是结构化 JSON 文件，必须用 write 工具写入 {out_json}，"
+                f"严格遵循以下 JSON Schema（字段、类型、必填项都要满足）：\n"
+                f"{json.dumps(schema, ensure_ascii=False)}\n"
+                f"（markdown 文档可继续写作为可读版，但 JSON 是图侧确定性校验的正式产物。）"
+            )
         await client.prompt(created["sessionId"], prompt)
     return state
 

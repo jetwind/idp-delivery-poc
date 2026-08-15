@@ -64,26 +64,124 @@ DEFAULT_SCHEMAS: dict[str, dict] = {
     "design": {
         "title": "详细设计",
         "type": "object",
-        "required": ["modules"],
-        "properties": {"modules": {"type": "array", "items": {"type": "object"}}},
+        "required": ["businessDesign", "architecture", "modules", "serviceAttribution", "risks"],
+        "properties": {
+            "businessDesign": {"type": "string", "minLength": 1},
+            "architecture": {"type": "string", "minLength": 1},
+            "modules": {
+                "type": "array", "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["name", "responsibility", "interfaces", "dataStructures", "dependencies"],
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "responsibility": {"type": "string", "minLength": 1},
+                        "interfaces": {"type": "array", "items": {"type": "string"}},
+                        "dataStructures": {"type": "array", "items": {"type": "string"}},
+                        "dependencies": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+            "serviceAttribution": {
+                "type": "array", "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["service", "type"],
+                    "properties": {
+                        "service": {"type": "string", "minLength": 1},
+                        "type": {"type": "string", "enum": ["new", "upgrade"]},
+                    },
+                },
+            },
+            "risks": {"type": "array", "items": {"type": "string"}},
+        },
     },
     "tasks": {
         "title": "任务拆解",
         "type": "object",
-        "required": ["tasks"],
-        "properties": {"tasks": {"type": "array", "items": {"type": "object"}}},
+        "required": ["services", "tasks", "taskRings"],
+        "properties": {
+            "services": {
+                "type": "array", "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["name", "type", "stack"],
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "type": {"type": "string", "enum": ["new", "upgrade"]},
+                        "stack": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
+            "tasks": {
+                "type": "array", "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["id", "title", "service", "acceptanceCriteria", "dependencies"],
+                    "properties": {
+                        "id": {"type": "string", "minLength": 1},
+                        "title": {"type": "string", "minLength": 1},
+                        "service": {"type": "string", "minLength": 1},
+                        "acceptanceCriteria": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+                        "dependencies": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+            "taskRings": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        },
     },
     "coding": {
         "title": "实现说明",
         "type": "object",
-        "required": ["changes"],
-        "properties": {"changes": {"type": "array", "items": {"type": "object"}}},
+        "required": ["changes", "buildCommand", "testCommand", "services"],
+        "properties": {
+            "changes": {
+                "type": "array", "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["taskId", "description", "verification"],
+                    "properties": {
+                        "taskId": {"type": "string", "minLength": 1},
+                        "description": {"type": "string", "minLength": 1},
+                        "verification": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
+            "buildCommand": {"type": "string", "minLength": 1},
+            "testCommand": {"type": "string", "minLength": 1},
+            "services": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        },
     },
     "testing": {
         "title": "测试报告",
         "type": "object",
-        "required": ["summary"],
-        "properties": {"summary": {"type": "string"}},
+        "required": ["summary", "unitTest", "defects"],
+        "properties": {
+            "summary": {"type": "string", "minLength": 1},
+            "unitTest": {
+                "type": "object",
+                "required": ["command", "total", "passed", "failed"],
+                "properties": {
+                    "command": {"type": "string", "minLength": 1},
+                    "total": {"type": "number", "minimum": 0},
+                    "passed": {"type": "number", "minimum": 0},
+                    "failed": {"type": "number", "minimum": 0},
+                },
+            },
+            "interfaceTest": {"type": "array", "items": {"type": "object"}},
+            "e2eTest": {"type": "array", "items": {"type": "object"}},
+            "defects": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["description", "severity"],
+                    "properties": {
+                        "description": {"type": "string", "minLength": 1},
+                        "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+                    },
+                },
+            },
+        },
     },
 }
 
