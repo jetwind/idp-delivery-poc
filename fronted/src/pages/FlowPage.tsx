@@ -213,48 +213,6 @@ export default function FlowPage() {
         </div>
       )}
 
-      {/* 实时日志 */}
-      {threadId && (
-        <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-            <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-slate-500" />
-              <span className="text-[13px] font-semibold text-slate-800">运行日志</span>
-              {selectedStageName ? <Pill tone="violet">{selectedStageName}</Pill> : (running && <Pill tone="blue" dot>运行中</Pill>)}
-              {shownLogs.length > 0 && <span className="text-xs text-slate-400">{shownLogs.length} 条</span>}
-            </div>
-            {selectedStage && (
-              <button onClick={() => setSelectedStage(null)} className="text-xs text-indigo-600 hover:underline">显示全部阶段</button>
-            )}
-          </div>
-          <div ref={logRef} className="px-5 py-3 max-h-[420px] overflow-y-auto space-y-1.5">
-            {shownLogs.length === 0 ? (
-              <div className="text-xs text-slate-400">{selectedStage ? '该阶段暂无日志（尚未运行或未产生输出）' : '启动中，等待 agent 产出…'}</div>
-            ) : (
-              shownLogs.map((e, i) => <LogItem key={i} e={e} />)
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 选中阶段的产出 */}
-      {threadId && selectedStage && selectedOutputs.length > 0 && (
-        <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
-          <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-100">
-            <FileText className="w-4 h-4 text-slate-500" />
-            <span className="text-[13px] font-semibold text-slate-800">{selectedStageName} 阶段产出</span>
-          </div>
-          <div className="px-5 py-3 flex flex-wrap gap-1.5">
-            {selectedOutputs.map(f => (
-              <code key={f} className="text-xs font-mono text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{f}</code>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 工作区文件浏览器 */}
-      {threadId && <FileBrowser threadId={threadId} />}
-
       {/* 运行状态 */}
       {threadId && snapshot && (
         <div className="space-y-4">
@@ -368,6 +326,48 @@ export default function FlowPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* 选中阶段的产出 */}
+      {threadId && selectedStage && selectedOutputs.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-100">
+            <FileText className="w-4 h-4 text-slate-500" />
+            <span className="text-[13px] font-semibold text-slate-800">{selectedStageName} 阶段产出</span>
+          </div>
+          <div className="px-5 py-3 flex flex-wrap gap-1.5">
+            {selectedOutputs.map(f => (
+              <code key={f} className="text-xs font-mono text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{f}</code>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 工作区文件浏览器 */}
+      {threadId && <FileBrowser threadId={threadId} />}
+
+      {/* 实时日志（放最下面，观察性） */}
+      {threadId && (
+        <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-slate-500" />
+              <span className="text-[13px] font-semibold text-slate-800">运行日志</span>
+              {selectedStageName ? <Pill tone="violet">{selectedStageName}</Pill> : (running && <Pill tone="blue" dot>运行中</Pill>)}
+              {shownLogs.length > 0 && <span className="text-xs text-slate-400">{shownLogs.length} 条</span>}
+            </div>
+            {selectedStage && (
+              <button onClick={() => setSelectedStage(null)} className="text-xs text-indigo-600 hover:underline">显示全部阶段</button>
+            )}
+          </div>
+          <div ref={logRef} className="px-5 py-3 max-h-[420px] overflow-y-auto space-y-1.5">
+            {shownLogs.length === 0 ? (
+              <div className="text-xs text-slate-400">{selectedStage ? '该阶段暂无日志（尚未运行或未产生输出）' : '启动中，等待 agent 产出…'}</div>
+            ) : (
+              shownLogs.map((e, i) => <LogItem key={i} e={e} />)
+            )}
+          </div>
         </div>
       )}
     </div>

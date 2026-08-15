@@ -97,11 +97,14 @@ export interface FlowFileContent {
 
 // 编排服务直连（带 CORS）。/flow/start、/flow/resume 已异步化（立即返回），
 // 前端轮询 /flow/state（阶段/待处理项）与 /flow/events（实时日志）。
-const FLOW_BASE = 'http://localhost:8080'
+// 注意用 127.0.0.1 而非 localhost：uvicorn 只监听 IPv4，localhost 会先解析到
+// IPv6 ::1 再回退，每个请求多 3-5s，轮询堆积会把 resume 卡住。
+const FLOW_BASE = 'http://127.0.0.1:8080'
 
 async function flowJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${FLOW_BASE}${path}`, {
     headers: { 'content-type': 'application/json' },
+    signal: AbortSignal.timeout(30000),
     ...init,
   })
   if (!res.ok) {
