@@ -28,6 +28,7 @@ from graph import STAGES, build_graph
 from harness_client import HarnessClient
 import standards_store
 import activity_store
+import config_store
 
 app = FastAPI(title="delivery-orchestrator")
 app.add_middleware(
@@ -60,6 +61,8 @@ _GIT_URL_PREFIXES = ("http://", "https://", "git@", "ssh://", "git://")
 standards_store.init_db(os.path.join(DELIVERY_ROOT, "standards"))
 # 运行监控/审计活动记录：SQLite（与 standards 同库）。
 activity_store.init_db()
+# 数字员工模型配置：SQLite。
+config_store.init_db()
 
 
 def _is_git_url(value: str) -> bool:
@@ -656,6 +659,63 @@ async def agents_activity(limit: int = 50) -> dict[str, Any]:
 async def agents_audit(limit: int = 100) -> dict[str, Any]:
     """审计日志：审批事件（危险命令 approval）记录。"""
     return {"audits": activity_store.list_activity(kind="approval", limit=limit)}
+
+
+# ---- 数字员工模型配置（模型 + 思考深度）----
+
+_model_catalog: list[dict[str, Any]] = []
+
+
+@app.get("/agents/models")
+async def agents_models() -> dict[str, Any]:
+    """可用模型目录（provider/model/思考深度），从 harness 模型目录读取并缓存。"""
+    global _model_catalog
+    if not _model_catalog:
+        sessions = await client.list_sessions()
+        if sessions:
+            models = await client.session_models(sessions[0]["sessionId"])
+            catalog = []
+            for g in models.get("groups", []):
+                for m in g.get("models", []):
+                    reasoning = m.get("reasoning") or {}
+                    catalog.append({
+                        "provider": g["id"],
+                        "model": m["id"],
+                        "name": m.get("name") or m["id"],
+                        "efforts": [e["id"] for e in reasoning.get("efforts", [])],
+                        "defaultEffort": reasoning.get("defaultEffort"),
+                    })
+            _model_catalog = catalog
+    return {"models": _model_catalog}
+
+
+@app.get("/agents/config")
+async def agents_config() -> dict[str, Any]:
+    """每个数字员工当前的模型配置（未配置的阶段返回 null）。"""
+    configs = config_store.get_all_configs()
+    result = []
+    for s in STAGES:
+        cfg = configs.get(s["id"])
+        result.append({
+            "id": s["id"],
+            "name": s["name"],
+            "config": cfg or None,
+        })
+    return {"configs": result}
+
+
+class AgentConfigRequest(BaseModel):
+    provider: str
+    model: str
+    reasoningEffort: str
+
+
+@app.put("/agents/config")
+async def agents_set_config(stage: str, req: AgentConfigRequest) -> dict[str, Any]:
+    if stage not in _STAGE_IDS:
+        raise HTTPException(status_code=400, detail=f"未知阶段：{stage}")
+    config_store.set_config(stage, req.provider, req.model, req.reasoningEffort)
+    return {"stage": stage, "ok": True}
 
 
 if __name__ == "__main__":

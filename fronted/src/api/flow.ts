@@ -273,3 +273,52 @@ export function getAgentsActivity(limit = 50): Promise<{ activities: AgentActivi
 export function getAgentsAudit(limit = 100): Promise<{ audits: AuditRecord[] }> {
   return flowJson(`/agents/audit?limit=${limit}`)
 }
+
+// ---- 数字员工模型配置 ----
+
+export interface ModelOption {
+  provider: string
+  model: string
+  name: string
+  efforts: string[]
+  defaultEffort?: string
+}
+
+export interface AgentModelConfig {
+  provider: string
+  model: string
+  reasoningEffort: string
+}
+
+export interface AgentConfigRow {
+  id: string
+  name: string
+  config: AgentModelConfig | null
+}
+
+/** 可用模型目录（flash/pro + 思考深度）。 */
+export function getAgentModels(): Promise<{ models: ModelOption[] }> {
+  return flowJson('/agents/models')
+}
+
+/** 每个数字员工当前的模型配置。 */
+export async function getAgentConfigs(): Promise<{ configs: AgentConfigRow[] }> {
+  const r = await flowJson<{ configs: any[] }>('/agents/config')
+  return {
+    configs: r.configs.map(c => ({
+      id: c.id,
+      name: c.name,
+      config: c.config
+        ? { provider: c.config.provider, model: c.config.model, reasoningEffort: c.config.reasoning_effort }
+        : null,
+    })),
+  }
+}
+
+/** 设置某数字员工的模型配置。 */
+export function setAgentConfig(stage: string, cfg: AgentModelConfig): Promise<{ ok: boolean }> {
+  return flowJson(`/agents/config?stage=${encodeURIComponent(stage)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ provider: cfg.provider, model: cfg.model, reasoningEffort: cfg.reasoningEffort }),
+  })
+}

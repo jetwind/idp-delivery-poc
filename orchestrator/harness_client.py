@@ -52,6 +52,18 @@ class HarnessClient:
     async def create_session(self, cwd: str, agent_preset: str) -> dict[str, Any]:
         return await self._legacy("session.create", {"cwd": cwd, "agentPreset": agent_preset})
 
+    async def select_model(
+        self, session_id: str, provider: str, model: str, reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        """给 session 选模型 + 思考深度（reasoningEffort: off/high/max）。"""
+        payload: dict[str, Any] = {"sessionId": session_id, "provider": provider, "model": model}
+        if reasoning_effort:
+            payload["reasoningEffort"] = reasoning_effort
+        return await self._legacy("session.selectModel", payload)
+
+    async def session_models(self, session_id: str) -> dict[str, Any]:
+        return await self._legacy("session.models", {"sessionId": session_id})
+
     async def prompt(self, session_id: str, text: str) -> dict[str, Any]:
         return await self._legacy(
             "session.prompt",

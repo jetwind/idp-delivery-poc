@@ -28,6 +28,7 @@ from langgraph.types import interrupt
 
 from harness_client import HarnessClient
 import activity_store
+import config_store
 
 
 class FlowState(TypedDict, total=False):
@@ -204,6 +205,15 @@ async def start_stage(state: FlowState, client: HarnessClient) -> FlowState:
     if state.get("current_session_id") is None:
         created = await client.create_session(state["cwd"], stage["preset"])
         state["current_session_id"] = created["sessionId"]
+        # 应用该阶段数字员工的模型配置（模型 + 思考深度）；失败则回退默认模型，不阻断流程。
+        cfg = config_store.get_config(stage["id"])
+        if cfg:
+            try:
+                await client.select_model(
+                    created["sessionId"], cfg["provider"], cfg["model"], cfg["reasoning_effort"],
+                )
+            except Exception:  # noqa: BLE001 - 选模型失败用默认模型
+                pass
         prompt = stage["task"]
         input_text = collect_input_files(state, stage)
         if input_text:

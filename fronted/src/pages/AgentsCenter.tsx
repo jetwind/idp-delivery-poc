@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getAgents, getAgentsCost, getAgentsActivity, getAgentsAudit, type DigitalAgent, type AgentsCost, type AgentActivity, type AuditRecord } from '@/api/flow'
+import { getAgents, getAgentsCost, getAgentsActivity, getAgentsAudit, getAgentModels, getAgentConfigs, setAgentConfig, type DigitalAgent, type AgentsCost, type AgentActivity, type AuditRecord, type ModelOption, type AgentConfigRow } from '@/api/flow'
 import { PageHeader, Pill, Bar, T, thCls, tdCls } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -34,13 +34,17 @@ export default function AgentsCenter() {
   const [cost, setCost] = useState<AgentsCost | null>(null)
   const [activities, setActivities] = useState<AgentActivity[]>([])
   const [audits, setAudits] = useState<AuditRecord[]>([])
+  const [models, setModels] = useState<ModelOption[]>([])
+  const [configs, setConfigs] = useState<AgentConfigRow[]>([])
   const [loading, setLoading] = useState(true)
   const [permAgent, setPermAgent] = useState<DigitalAgent | null>(null)
+  const [editModel, setEditModel] = useState('')
+  const [editEffort, setEditEffort] = useState('')
 
   useEffect(() => {
     let alive = true
-    Promise.all([getAgents(), getAgentsCost(), getAgentsActivity(), getAgentsAudit()])
-      .then(([a, c, act, au]) => { if (alive) { setAgents(a.agents); setCost(c); setActivities(act.activities); setAudits(au.audits) } })
+    Promise.all([getAgents(), getAgentsCost(), getAgentsActivity(), getAgentsAudit(), getAgentModels(), getAgentConfigs()])
+      .then(([a, c, act, au, mo, cf]) => { if (alive) { setAgents(a.agents); setCost(c); setActivities(act.activities); setAudits(au.audits); setModels(mo.models); setConfigs(cf.configs) } })
       .catch(() => {})
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
@@ -48,6 +52,26 @@ export default function AgentsCenter() {
 
   const costOf = (id: string) => cost?.agents.find(a => a.id === id)
   const maxCost = Math.max(1, ...(cost?.agents.map(a => a.cost) ?? [1]))
+  const configOf = (id: string) => configs.find(c => c.id === id)?.config
+
+  function openPerm(a: DigitalAgent) {
+    const cfg = configOf(a.id)
+    setPermAgent(a)
+    setEditModel(cfg?.model ?? (models[0]?.model ?? ''))
+    setEditEffort(cfg?.reasoningEffort ?? (models.find(m => m.model === (cfg?.model ?? models[0]?.model))?.defaultEffort ?? ''))
+  }
+
+  async function saveModel() {
+    if (!permAgent || !editModel || !editEffort) return
+    const m = models.find(x => x.model === editModel)
+    const provider = m?.provider ?? 'deepseek-official'
+    try {
+      await setAgentConfig(permAgent.id, { provider, model: editModel, reasoningEffort: editEffort })
+      const cf = await getAgentConfigs()
+      setConfigs(cf.configs)
+      setPermAgent(null)
+    } catch { /* 保存失败不阻断 */ }
+  }
 
   return (
     <div>
@@ -94,7 +118,7 @@ export default function AgentsCenter() {
                         <div className="rounded-md bg-slate-50 py-2"><div className="text-[15px] font-semibold text-slate-800">¥{c?.cost ?? 0}</div><div className="text-[10px] text-slate-400">累计成本</div></div>
                       </div>
                       <div className="mt-3 flex items-center justify-between">
-                        <button className="text-xs text-indigo-600 hover:underline" onClick={() => setPermAgent(a)}>配置能力 / 知识库</button>
+                        <button className="text-xs text-indigo-600 hover:underline" onClick={() => openPerm(a)}>配置能力 / 模型 / 知识库</button>
                         <Pill tone="green" dot>待命</Pill>
                       </div>
                     </div>
@@ -258,9 +282,31 @@ export default function AgentsCenter() {
                   </div>
                   <p className="mt-2 text-[11px] text-slate-400">知识库经 MCP 只读查询提供，维护入口在「标准与规范」页面。</p>
                 </div>
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2"><Bot className="w-3.5 h-3.5 text-violet-500" />模型与思考深度</div>
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-[11px] text-slate-400 mb-1">模型</div>
+                      <select value={editModel} onChange={e => { setEditModel(e.target.value); setEditEffort(models.find(m => m.model === e.target.value)?.defaultEffort ?? '') }}
+                        className="w-full h-8 rounded-md border border-slate-200 px-2 text-xs bg-white">
+                        {models.map(m => <option key={m.model} value={m.model}>{m.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-400 mb-1">思考深度</div>
+                      <select value={editEffort} onChange={e => setEditEffort(e.target.value)}
+                        className="w-full h-8 rounded-md border border-slate-200 px-2 text-xs bg-white">
+                        {(models.find(m => m.model === editModel)?.efforts ?? ['off', 'high', 'max']).map(ef => (
+                          <option key={ef} value={ef}>{ef === 'off' ? 'off（不思考）' : ef === 'high' ? 'high（高）' : 'max（最大）'}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <p className="text-[11px] text-slate-400">简单阶段可用 flash + off，复杂阶段（如编码）用 pro + high/max。</p>
+                  </div>
+                </div>
                 <div className="flex justify-end gap-2 pt-1">
-                  <Button variant="outline" onClick={() => setPermAgent(null)}>关闭</Button>
-                  <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setPermAgent(null)}><CheckCircle2 className="w-4 h-4 mr-1" />知道了</Button>
+                  <Button variant="outline" onClick={() => setPermAgent(null)}>取消</Button>
+                  <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={saveModel}><CheckCircle2 className="w-4 h-4 mr-1" />保存模型配置</Button>
                 </div>
               </div>
             </>
