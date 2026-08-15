@@ -747,6 +747,7 @@ async def agents_config() -> dict[str, Any]:
                 "model": cfg["model"],
                 "reasoningEffort": cfg["reasoning_effort"],
                 "permission": cfg.get("permission"),
+                "maxRetries": cfg.get("max_retries"),
             } if cfg else None,
         })
     return {"configs": result}
@@ -757,6 +758,7 @@ class AgentConfigRequest(BaseModel):
     model: str
     reasoningEffort: str
     permission: str | None = None
+    maxRetries: int | None = None
 
 
 @app.put("/agents/config")
@@ -765,7 +767,12 @@ async def agents_set_config(stage: str, req: AgentConfigRequest) -> dict[str, An
         raise HTTPException(status_code=400, detail=f"未知阶段：{stage}")
     if req.permission is not None and req.permission not in config_store.PERMISSIONS:
         raise HTTPException(status_code=400, detail=f"非法权限：{req.permission}，可用：{', '.join(config_store.PERMISSIONS)}")
-    config_store.set_config(stage, req.provider, req.model, req.reasoningEffort, req.permission)
+    if req.maxRetries is not None and not (0 <= req.maxRetries <= config_store.MAX_RETRIES_CAP):
+        raise HTTPException(
+            status_code=400,
+            detail=f"非法重试次数：{req.maxRetries}，须为 0~{config_store.MAX_RETRIES_CAP} 的整数",
+        )
+    config_store.set_config(stage, req.provider, req.model, req.reasoningEffort, req.permission, req.maxRetries)
     return {"stage": stage, "ok": True}
 
 

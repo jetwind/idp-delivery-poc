@@ -295,6 +295,7 @@ export interface AgentModelConfig {
   model: string
   reasoningEffort: string
   permission?: string | null
+  maxRetries?: number | null
 }
 
 export interface AgentConfigRow {
@@ -321,6 +322,7 @@ export async function getAgentConfigs(): Promise<{ configs: AgentConfigRow[] }> 
             model: c.config.model,
             reasoningEffort: c.config.reasoningEffort,
             permission: c.config.permission ?? null,
+            maxRetries: c.config.maxRetries ?? null,
           }
         : null,
     })),
@@ -336,6 +338,7 @@ export function setAgentConfig(stage: string, cfg: AgentModelConfig): Promise<{ 
       model: cfg.model,
       reasoningEffort: cfg.reasoningEffort,
       permission: cfg.permission ?? null,
+      maxRetries: cfg.maxRetries ?? null,
     }),
   })
 }

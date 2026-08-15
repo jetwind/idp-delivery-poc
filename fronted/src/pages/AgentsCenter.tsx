@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { Bot, ShieldCheck, Activity, Wallet, ScrollText, Wrench, BookOpen, AlertTriangle, Ban, CheckCircle2, Loader2 } from 'lucide-react'
+import { Bot, ShieldCheck, Activity, Wallet, ScrollText, Wrench, BookOpen, AlertTriangle, Ban, CheckCircle2, Loader2, RefreshCw } from 'lucide-react'
 
 const agentColor: Record<string, string> = {
   requirements: 'from-blue-500 to-indigo-500',
@@ -41,6 +41,7 @@ export default function AgentsCenter() {
   const [editModel, setEditModel] = useState('')
   const [editEffort, setEditEffort] = useState('')
   const [editPerm, setEditPerm] = useState('workspace-write')
+  const [editRetries, setEditRetries] = useState(2)
 
   useEffect(() => {
     let alive = true
@@ -61,6 +62,7 @@ export default function AgentsCenter() {
     setEditModel(cfg?.model ?? (models[0]?.model ?? ''))
     setEditEffort(cfg?.reasoningEffort ?? (models.find(m => m.model === (cfg?.model ?? models[0]?.model))?.defaultEffort ?? ''))
     setEditPerm(cfg?.permission ?? 'workspace-write')
+    setEditRetries(cfg?.maxRetries ?? 2)
   }
 
   async function saveModel() {
@@ -68,7 +70,7 @@ export default function AgentsCenter() {
     const m = models.find(x => x.model === editModel)
     const provider = m?.provider ?? 'deepseek-official'
     try {
-      await setAgentConfig(permAgent.id, { provider, model: editModel, reasoningEffort: editEffort, permission: editPerm })
+      await setAgentConfig(permAgent.id, { provider, model: editModel, reasoningEffort: editEffort, permission: editPerm, maxRetries: editRetries })
       const cf = await getAgentConfigs()
       setConfigs(cf.configs)
       setPermAgent(null)
@@ -316,6 +318,18 @@ export default function AgentsCenter() {
                       <option value="danger-full-access">full-access（完全访问）</option>
                     </select>
                     <p className="text-[11px] text-slate-400">映射到 harness 沙箱：只读 / 工作区可写 / 完全访问。</p>
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2"><RefreshCw className="w-3.5 h-3.5 text-amber-500" />产物验收重试次数</div>
+                  <div className="space-y-2">
+                    <select value={editRetries} onChange={e => setEditRetries(Number(e.target.value))}
+                      className="w-full h-8 rounded-md border border-slate-200 px-2 text-xs bg-white">
+                      {[0, 1, 2, 3, 4, 5].map(n => (
+                        <option key={n} value={n}>{n === 0 ? '0（失败即升级人工）' : `${n} 次`}</option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400">结构化产物未通过 schema/命令验收时，把失败原因反馈给该员工自动重试的次数；超限升级人工 gate。</p>
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-1">

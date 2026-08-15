@@ -29,7 +29,7 @@ harness 执行层 (3086, dsh web)
 | 05 测试 | testing | `docs/test-report.json` | `docs/test-report.md` | jsonschema + 跑 `unitTest.command` 取退出码、`failed` 必须为 0 |
 
 - 产物 JSON Schema 存 SQLite（`schema_store.py`），可经 UI「产物 Schema」tab 或 `PUT /stages/schema/{stage}` 配置。
-- 校验失败 → 反馈进 prompt 重试（上限 2 次）→ 仍失败升级人工 gate（`validation_status=failed`）。
+- 校验失败 → 反馈进 prompt 重试（次数每阶段可配置，默认 2 次，见「数字员工中心」）→ 仍失败升级人工 gate（`validation_status=failed`）。
 - 版本与审计走 git：每阶段产物落盘后 `git commit`（作者去标识为 `jetwind`）。
 
 ## 文件说明
@@ -39,7 +39,7 @@ harness 执行层 (3086, dsh web)
 - `harness_client.py` — harness 3086 的 HTTP/WebSocket 客户端（session.* + commands/execute + respond）。
 - `schema_store.py` — 阶段产物 JSON Schema 存储 + `jsonschema` Draft202012 校验。
 - `standards_store.py` — 标准/领域知识集中存储（SQLite），经 `POST /mcp`（streamable-http）给各 harness agent。
-- `config_store.py` — 各阶段数字员工的模型/思考深度/文件权限配置。
+- `config_store.py` — 各阶段数字员工的模型/思考深度/文件权限/产物验收重试次数配置。
 - `activity_store.py` — 审批（危险命令）审计落盘。
 - `test_flow.py` — 端到端验证（旧）；`verify_full_flow.py` — 5 阶段端到端（自动答 question + approve gate）。
 - `test_command_acceptance.py` / `test_validate_acceptance.py` — 04/05 命令验收的单测 / 集成测试（不依赖 harness）。

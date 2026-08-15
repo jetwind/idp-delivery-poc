@@ -308,7 +308,6 @@ async def approval_node(state: FlowState, client: HarnessClient) -> FlowState:
     return state
 
 
-MAX_VALIDATION_ATTEMPTS = 2
 COMMAND_TIMEOUT_SECONDS = 600
 
 
@@ -408,7 +407,7 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
     attempts = state.get("validation_attempts", 0) + 1
     state["validation_attempts"] = attempts
     state["validation_error"] = "\n".join(errors)
-    if attempts < MAX_VALIDATION_ATTEMPTS:
+    if attempts < config_store.get_max_retries(stage_id):
         # 重试：把失败原因反馈给 agent，让它修正后重新写文件。
         state["validation_status"] = "retrying"
         state["stage_done"] = False
