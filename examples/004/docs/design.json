@@ -1,0 +1,127 @@
+{
+  "title": "一物一码追溯码管理服务详细设计",
+  "businessDesign": "【业务流程】核心两条主路径：批量赋码（FR-1）与按码溯源（FR-2/FR-3）。\n\n一、批量赋码主流程：调用方（生产/库存人员或集成方）向 REST 生成接口提交 { 企业前缀, 商品代码, 产品名, 批次, 生产日期, 生成数量N } → Controller 做 HTTP 层参数与格式校验（含 N 范围 1~1000）→ Service 进入临界区，按商品代码基于当前最新序号原子分配连续序列号 → 组装 N 个追溯码（企业前缀+商品代码+定长序列号）→ 以追溯码为 key 写入内存存储 → 返回 N 个码（含结构化三元组）。\n\n二、再生成追加流程（同一商品代码第二次或第 N 次生成）：序列号在上次基础上继续递增而不断号，新记录追加进内存 Map，不覆盖旧记录，因此一次生成可生产远超单次上限的追溯码（跨多次累加）。\n\n三、查询主流程：使用者在 Vue 页输入追溯码点击查询，前端调用后端 GET 查询接口 → Controller 校验非空与格式 → Service 按定长规则无歧义解析出三元组 → 以原码为 key 查内存 Map → 命中则返回{产品名,批次,生产日期}，未命中返回 404。\n\n异常路径：\n- 生成：N<1 或 N>1000 或非数字 → 400；企业前缀/商品代码非纯数字或长度非定长 → 400；产品名/批次为空串 → 400；生产日期非法 → 400。\n- 查询：码为空 → 400；码含非数字或总长非 14 位或无法按定长切分 → 400；格式合法但未入库 → 404。\n- 并发生成同一商品代码：通过按(企业前缀,商品代码)加锁的原子分配保证序列号严格递增、无重复。\n\n【领域模型】\n核心聚合：ProductBatch（生产批次），聚合根。值对象 / 属性：\n- 企业前缀 companyPrefix（定长3位数字串）\n- 商品代码 productCode（定长3位数字串）\n- 产品名 productName（字符串，非空）\n- 批次 batchNo（字符串，非空）\n- 生产日期 productionDate（LocalDate）\n- 序列段长序列号 serialNumber（定长8位数字串）\n关系：一个 ProductBatch 对应一个 (企业前缀,商品代码)；追溯码 traceCode 是唯一业务标识，由三段定长拼接生成，可无歧义解析回三元组。内存库以 Map<追溯码, Record> 与 Map<(企业前缀,商品代码), 最新序列号计数> 表达。无跨聚合复杂关系，原型期就只有一个聚合。\n\n【业务规则】\nR1 追溯码 = 企业前缀(3位) + 商品代码(3位) + 序列号(8位)，总长 14 位，纯数字，无分隔符、无校验位。\nR2 序列号按(企业前缀,商品代码)独立从 1 开始、严格递增、高位补零到 8 位。\nR3 同一请求 N 件产品共享产品名/批次/生产日期，序列号连续；不同商品代码间序列号独立计数互不影响。\nR4 序列号分配必须原子且线程安全，同一商品代码并发下不产生重复码。\nR5 一个(企业前缀,商品代码)可多次追加生成，追加不覆盖既有记录。\nR6 成功生成的码一定可查询到且数据与生成一致（生成与查询共用同一内存存储）。\nR7 查询时按定长规则无歧义切分，切分失败即判定格式非法（400）。\nR8 段长配置全局一致，来源于集中配置(TraceCodeProperties)，不散落硬编码。",
+  "architecture": "【技术架构与模块划分】前后端一体、单体后端。\n\n后端（新建服务，Spring Boot 3.x + Java 21，Maven 单模块）：按层分包，码规则与查询分离：\n- controller 层：TraceCodeController（REST 端点、HTTP 参数校验、协议转换）。\n- service 层：TraceCodeGenerator（码组装/序列号分配）、TraceCodeQueryService（按码查询）、TraceCodeApplicationService（生成用例编排）。\n- store 层：InMemoryTraceCodeStore（内存态存储，Map + 计数）。\n- config 层：TraceCodeProperties（追溯码段长集中配置）、序列号分配同步器。\n- model 层：领域对象与 DTO（TraceCodeGenRequest/Response、TraceCodeQueryResponse、ApiResponse<T>、错误码枚举）。\n- 全局：GlobalExceptionHandler(@RestControllerAdvice 统一错误) 、TraceCodeFormatException、TraceCodeNotFoundException（业务异常，映射 400/404）。\n\n前端（新建服务，Vue 3 + Vite，纯查询页）：单页面 App.vue + TraceQuery 组件，通过 fetch/axios 调后端 /api/v1/trace-codes/{code}。\n\n统一响应体：{ code, message, data }；分页不适用（无列表查询）。\n\n【服务边界】\n- 新建服务：后端 trace-code-service（Spring Boot）。\n- 新建服务：前端 trace-query-web（Vue 3 + Vite）。\n\n【数据流】\n生成：前端/调用方 → POST /api/v1/trace-codes → TraceCodeApplicationService → TraceCodeGenerator（原子分配）+ InMemoryTraceCodeStore（写入）→ 返回码列表。\n查询：Vue 页面 → GET /api/v1/trace-codes/{code} → TraceCodeQueryService → InMemoryTraceCodeStore（读取）→ 返回产品信息或 404。\n通信方式：全程同步 HTTP；前端与后端同址部署或后端配置 CORS 允许前端静态托管地址。\n\n【技术选型】\n- 后端：Java 21、Spring Boot 3.2.x、spring-boot-starter-web、Maven。序列号分配用 java.util.concurrent.ConcurrentHashMap + 每个(企业前缀,商品代码)共享一把锁（ReentrantLock 分片）实现原子递增，不引入额外中间件。\n- 存储：无数据库，内存态 ConcurrentHashMap。重启清空，符合原型演示定位。\n- 前端：Vue 3 + TypeScript + Vite，请求用原生 fetch（无额外 HTTP 库），不引入 UI 框架以保持轻量。\n- 校验：Controller 用 spring-boot-starter-validation（jakarta validation）+ 数字格式手动校验。\n- 全局异常/日志：@RestControllerAdvice + SLF4J（logging）。",
+  "modules": [
+    {
+      "name": "后端 TraceCodeController（controller 层）",
+      "responsibility": "暴露 REST 端点，做 HTTP 层入参校验与协议转换，不含业务逻辑。",
+      "interfaces": [
+        "POST /api/v1/trace-codes  入参 body: TraceCodeGenRequest{companyPrefix,productCode,productName,batchNo,productionDate,count}  成功 200 → ApiResponse<TraceCodeGenResponse>，data={traceCodes:[{traceCode,companyPrefix,productCode,serialNumber,...}]}",
+        "GET /api/v1/trace-codes/{code}  pathParam=追溯码; 成功 200 → ApiResponse<TraceCodeQueryResponse>{productName,batchNo,productionDate}; 码不存在 404; 码为空或格式非法 400"
+      ],
+      "dataStructures": [
+        "TraceCodeGenRequest{ Long companyPrefix; Long productCode; String productName; String batchNo; @DateTimeFormat LocalDate productionDate; @NotNull @Min(1) @Max(1000) Integer count; }（前缀/商品代码以 Long 接收再格式化为定长字符串，天然剔除非数字）",
+        "TraceCodeGenResponse{ List<TraceCodeItem> traceCodes; }，TraceCodeItem{ String traceCode; String companyPrefix; String productCode; String serialNumber; }",
+        "TraceCodeQueryResponse{ String productName; String batchNo; String productionDate; }",
+        "ApiResponse<T>{ int code; String message; T data; }"
+      ],
+      "dependencies": [
+        "TraceCodeApplicationService"
+      ]
+    },
+    {
+      "name": "后端 TraceCodeGenerator（码生成/序列号分配）",
+      "responsibility": "按(企业前缀,商品代码,起始序列,数量)原子分配连续序列号并组装追溯码；是序列号唯一性与递增规则的唯一实现处。",
+      "interfaces": [
+        "List<TraceCodeItem> generate(companyPrefix, productCode, 起始序列号, count)：生成 count 个连续追溯码，序列号由调用方传入已预留的区间"
+      ],
+      "dataStructures": [
+        "TraceCodeItem{ traceCode; companyPrefix; productCode; serialNumber }",
+        "段长常量取自 TraceCodeProperties（PREFIX_LEN=3, PRODUCT_LEN=3, SERIAL_LEN=8, TOTAL_LEN=14）"
+      ],
+      "dependencies": [
+        "TraceCodeProperties",
+        "InMemoryTraceCodeStore（取当前计数）"
+      ]
+    },
+    {
+      "name": "后端 TraceCodeApplicationService（生成用例编排）",
+      "responsibility": "编排生成主流程：兜底参数校验 → 获取/创建该(企业前缀,商品代码)的连续序列号分配器并原子预留 [next, next+count) → 委托 Generator 组装 → 写入存储 → 返回。对同一商品代码的并发生成在此以分片锁收敛，保证序列号严格递增无重复。",
+      "interfaces": [
+        "TraceCodeGenResponse generateTraceCodes(TraceCodeGenRequest req)"
+      ],
+      "dataStructures": [
+        "ConcurrentHashMap<TraceCodeKey, CounterLock> counterMap，其中 CounterLock{ AtomicLong next; ReentrantLock lock; }，TraceCodeKey=(companyPrefix,productCode)"
+      ],
+      "dependencies": [
+        "TraceCodeGenerator",
+        "InMemoryTraceCodeStore",
+        "TraceCodeProperties"
+      ]
+    },
+    {
+      "name": "后端 TraceCodeQueryService（按码查询）",
+      "responsibility": "按追溯码查询产品信息。负责格式校验（非空、纯数字、总长 14、按定长切分成功）与从内存库检索；查询逻辑与生成逻辑完全分离。",
+      "interfaces": [
+        "TraceCodeQueryResponse queryByCode(String traceCode)：格式非法抛 TraceCodeFormatException→400；未命中抛 TraceCodeNotFoundException→404"
+      ],
+      "dataStructures": [
+        "解析结果 Triple{ prefix, productCode, serialNumber }（仅内部使用）",
+        "TraceCodeQueryResponse{ productName; batchNo; productionDate }"
+      ],
+      "dependencies": [
+        "InMemoryTraceCodeStore",
+        "TraceCodeProperties"
+      ]
+    },
+    {
+      "name": "后端 InMemoryTraceCodeStore（内存态存储）",
+      "responsibility": "管理全部内存态数据：按追溯码索引的产品记录 Map，以及读最新序列号的读取能力；线程安全；服务重启即清空。",
+      "interfaces": [
+        "void save(String traceCode, ProductRecord record)：保存（Map.put）",
+        "ProductRecord findByTraceCode(String traceCode)：按码查找"
+      ],
+      "dataStructures": [
+        "ConcurrentHashMap<String, ProductRecord> records；ProductRecord{ traceCode; companyPrefix; productCode; productName; batchNo; productionDate }"
+      ],
+      "dependencies": []
+    },
+    {
+      "name": "后端 全局异常与配置（GlobalExceptionHandler / TraceCodeProperties）",
+      "responsibility": "统一错误响应（400/404/500 规范化 {code,message,data}），将业务异常映射为 HTTP 状态码；集中承载追溯码段长配置，保证全局一致、可维护。",
+      "interfaces": [
+        "GlobalExceptionHandler：@ExceptionHandler 处理 TraceCodeFormatException/Validation 异常→400，TraceCodeNotFoundException→404，其它→500",
+        "配置项 trace-code.prefix-length=3 / product-code-length=3 / serial-number-length=8（经 TraceCodeProperties 绑定）"
+      ],
+      "dataStructures": [
+        "错误码枚举 ErrorCode{ CODE_LEN_INVALID, COUNT_INVALID, CODE_NOT_FOUND, PARAM_MISSING, ... }",
+        "ApiResponse<T>{ code; message; data }"
+      ],
+      "dependencies": []
+    },
+    {
+      "name": "前端 TraceQuery 查询页面（Vue 3 + Vite）",
+      "responsibility": "提供追溯码输入框与查询按钮，调用后端 GET 接口展示产品名、批次、生产日期；阻止空输入；区分'未找到'与'服务异常'提示。",
+      "interfaces": [
+        "页面 UI：输入框 + 点击查询；调 GET /api/v1/trace-codes/{code}",
+        "交互约束：追码为空时前置校验并提示「请输入追溯码」，不发请求；404 → 展示「未找到该追溯码」；200 → 展示产品三元组；其它错误 → 展示错误信息"
+      ],
+      "dataStructures": [
+        "reactive state{ traceCode; queryResult{productName,batchNo,productionDate}|null; message; status }",
+        "API base URL 由 Vite 环境变量/代理配置"
+      ],
+      "dependencies": [
+        "后端 TraceCodeController（同一服务的 REST 接口）"
+      ]
+    }
+  ],
+  "serviceAttribution": [
+    {
+      "service": "trace-code-service（后端 Spring Boot 单体）",
+      "type": "new"
+    },
+    {
+      "service": "trace-query-web（前端 Vue 3 + Vite 查询页）",
+      "type": "new"
+    }
+  ],
+  "risks": [
+    "内存态存储，服务重启后所有追溯码与计数丢失，仅适合原型/演示，明确告知使用者。",
+    "序列号为连续顺序码且可被预测，若未来转向防伪需引入随机序列号或校验位（如 Luhn）。",
+    "段长（3/3/8）为设计决策的演示级取值；若未来前缀/商品数/批量规模超容量需扩容段长，会导致既有码无法兼容解析，需提前配置化预留扩展位。",
+    "并发核心风险：必须对同一(企业前缀,商品代码)的序列号分配加锁，否则并发生成可能产生重复码；已通过分片 ReentrantLock + 原子预留区间规避。",
+    "段长依赖集中配置但若在代码中散落硬编码会导致"不可无歧义解析"退化，需在实现与 code review 中严格约束只读配置。",
+    "若大并发同商品生成，单商品串行加锁会成为吞吐瓶颈；原型规模 N≤1000 可接受，生产化需切换数据库序列或乐观锁方案。"
+  ]
+}
