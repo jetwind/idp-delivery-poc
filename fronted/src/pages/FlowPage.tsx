@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import WorkspaceFileBrowser from '@/components/WorkspaceFileBrowser'
+import ArtifactReviewDialog from '@/components/ArtifactReviewDialog'
 import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare, ListChecks, Circle, History, ChevronDown } from 'lucide-react'
 
 const STAGES = [
@@ -34,6 +35,7 @@ export default function FlowPage() {
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const [auditTrail, setAuditTrail] = useState<AuditFinding[]>([])
   const [trailOpen, setTrailOpen] = useState(false)
+  const [reviewFile, setReviewFile] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const seenRef = useRef<Set<string>>(new Set())
   const eventsBusyRef = useRef(false)
@@ -204,6 +206,8 @@ export default function FlowPage() {
   const selectedStageName = selectedStage ? STAGES.find(s => s.id === selectedStage)?.name : undefined
   const shownLogs = selectedStageName ? logs.filter(e => e.stage === selectedStageName) : logs
   const selectedOutputs = selectedStage && snapshot?.artifacts ? (snapshot.artifacts[selectedStage] ?? []) : []
+  const gateStageId = snapshot ? STAGES[snapshot.stage_index]?.id : undefined
+  const gateOutputs = gateStageId && snapshot?.artifacts ? (snapshot.artifacts[gateStageId] ?? []) : []
 
   return (
     <div>
@@ -401,6 +405,19 @@ export default function FlowPage() {
                 <ShieldCheck className="w-4 h-4 text-violet-500" />
                 <span className="text-[13px] font-semibold text-slate-800">「{pending.stage}」阶段已完成，等待人工确认</span>
               </div>
+              {gateOutputs.length > 0 && (
+                <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50/50 p-2.5">
+                  <div className="text-[11px] text-slate-500 mb-1.5">本阶段产物（点击预览 + 标注审计）</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {gateOutputs.map(f => (
+                      <button key={f} onClick={() => setReviewFile(f)}
+                        className="text-xs font-mono text-indigo-600 bg-white hover:bg-indigo-50 border border-indigo-200 rounded px-2 py-1 transition-colors">
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <p className="text-xs text-slate-500 mb-3">确认通过进入下一阶段；不通过时填写补充矫正意见（必填），agent 据此在当前版本上增量修订后再次提交。</p>
               <Textarea
                 rows={3}
@@ -544,6 +561,16 @@ export default function FlowPage() {
           </div>
         </div>
       )}
+
+      {/* 产物预览 + 审计对话框（gate 处点击产物文件弹出） */}
+      <ArtifactReviewDialog
+        open={!!reviewFile}
+        onClose={() => setReviewFile(null)}
+        threadId={threadId ?? ''}
+        versionId={vid ?? ''}
+        stage={gateStageId ?? ''}
+        path={reviewFile}
+      />
     </div>
   )
 }

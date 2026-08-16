@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react'
 import { type AuditFinding } from '@/api/flow'
 import { cn } from '@/lib/utils'
 import { Flag } from 'lucide-react'
@@ -55,13 +56,14 @@ function AnnotateButton({ ref, label, findings, onAnnotate }: {
   )
 }
 
-function JsonNode({ label, value, schema, path, findings, onAnnotate, depth }: {
+function JsonNode({ label, value, schema, path, findings, onAnnotate, renderForm, depth }: {
   label: string
   value: unknown
   schema: Record<string, unknown>
   path: string
   findings: AuditFinding[]
   onAnnotate: (ref: string, label: string) => void
+  renderForm: (ref: string) => ReactNode
   depth: number
 }) {
   const type = schema?.type as string | undefined
@@ -78,6 +80,7 @@ function JsonNode({ label, value, schema, path, findings, onAnnotate, depth }: {
           <span className="text-[11px] text-slate-400">{items.length} 项</span>
           <AnnotateButton ref={path} label={label} findings={findings} onAnnotate={onAnnotate} />
         </div>
+        {renderForm(path)}
         {items.length === 0 && <div className="text-[11px] text-slate-400 ml-2">（空）</div>}
         {itemType === 'object' ? (
           items.map((item, i) => {
@@ -92,8 +95,9 @@ function JsonNode({ label, value, schema, path, findings, onAnnotate, depth }: {
                 {Object.entries(props).map(([k, sub]) => (
                   <JsonNode key={k} label={LABELS[k] ?? k} value={(item as Record<string, unknown>)?.[k]}
                     schema={sub as Record<string, unknown>} path={`${itemPath}.${k}`}
-                    findings={findings} onAnnotate={onAnnotate} depth={depth + 1} />
+                    findings={findings} onAnnotate={onAnnotate} renderForm={renderForm} depth={depth + 1} />
                 ))}
+                {renderForm(itemPath)}
               </div>
             )
           })
@@ -101,10 +105,13 @@ function JsonNode({ label, value, schema, path, findings, onAnnotate, depth }: {
           items.map((item, i) => {
             const itemPath = `${path}[${i}]`
             return (
-              <div key={i} className={cn('group flex items-start gap-1.5 py-0.5 rounded px-1', hitCount(findings, itemPath) > 0 && 'bg-amber-50/40')}>
-                <span className="text-slate-300 text-[11px] w-4 shrink-0">{i + 1}.</span>
-                <span className="flex-1 text-slate-700 whitespace-pre-wrap break-words">{primitiveText(item, itemSchema)}</span>
-                <AnnotateButton ref={itemPath} label={`${label}[${i}]`} findings={findings} onAnnotate={onAnnotate} />
+              <div key={i}>
+                <div className={cn('group flex items-start gap-1.5 py-0.5 rounded px-1', hitCount(findings, itemPath) > 0 && 'bg-amber-50/40')}>
+                  <span className="text-slate-300 text-[11px] w-4 shrink-0">{i + 1}.</span>
+                  <span className="flex-1 text-slate-700 whitespace-pre-wrap break-words">{primitiveText(item, itemSchema)}</span>
+                  <AnnotateButton ref={itemPath} label={`${label}[${i}]`} findings={findings} onAnnotate={onAnnotate} />
+                </div>
+                {renderForm(itemPath)}
               </div>
             )
           })
@@ -121,10 +128,11 @@ function JsonNode({ label, value, schema, path, findings, onAnnotate, depth }: {
           <span className="text-[12px] font-semibold text-slate-700">{label}</span>
           <AnnotateButton ref={path} label={label} findings={findings} onAnnotate={onAnnotate} />
         </div>
+        {renderForm(path)}
         {Object.entries(props).map(([k, sub]) => (
           <JsonNode key={k} label={LABELS[k] ?? k} value={(value as Record<string, unknown>)?.[k]}
             schema={sub as Record<string, unknown>} path={`${path}.${k}`}
-            findings={findings} onAnnotate={onAnnotate} depth={depth + 1} />
+            findings={findings} onAnnotate={onAnnotate} renderForm={renderForm} depth={depth + 1} />
         ))}
       </section>
     )
@@ -132,20 +140,24 @@ function JsonNode({ label, value, schema, path, findings, onAnnotate, depth }: {
 
   // 基础类型（string / number / boolean）
   return (
-    <div className={cn('group flex items-start gap-1.5 py-0.5 rounded px-1', hits > 0 && 'bg-amber-50/40')}>
-      <span className="text-slate-400 text-[11px] w-16 shrink-0">{label}</span>
-      <span className="flex-1 text-slate-700 whitespace-pre-wrap break-words">{primitiveText(value, schema)}</span>
-      <AnnotateButton ref={path} label={label} findings={findings} onAnnotate={onAnnotate} />
+    <div>
+      <div className={cn('group flex items-start gap-1.5 py-0.5 rounded px-1', hits > 0 && 'bg-amber-50/40')}>
+        <span className="text-slate-400 text-[11px] w-16 shrink-0">{label}</span>
+        <span className="flex-1 text-slate-700 whitespace-pre-wrap break-words">{primitiveText(value, schema)}</span>
+        <AnnotateButton ref={path} label={label} findings={findings} onAnnotate={onAnnotate} />
+      </div>
+      {renderForm(path)}
     </div>
   )
 }
 
-/** 阶段产物 JSON 的预览模板：按 schema 渲染，每个元素可点「标记」挂审计意见。 */
-export default function JsonArtifactView({ json, schema, findings, onAnnotate }: {
+/** 阶段产物 JSON 的预览模板：按 schema 渲染，每个元素可点「标记」就地挂审计意见。 */
+export default function JsonArtifactView({ json, schema, findings, onAnnotate, renderForm }: {
   json: Record<string, unknown>
   schema: Record<string, unknown>
   findings: AuditFinding[]
   onAnnotate: (ref: string, label: string) => void
+  renderForm: (ref: string) => ReactNode
 }) {
   const props = (schema.properties || {}) as Record<string, unknown>
   return (
@@ -154,7 +166,7 @@ export default function JsonArtifactView({ json, schema, findings, onAnnotate }:
       {Object.entries(props).map(([k, sub]) => (
         <JsonNode key={k} label={LABELS[k] ?? k} value={json?.[k]}
           schema={sub as Record<string, unknown>} path={k}
-          findings={findings} onAnnotate={onAnnotate} depth={0} />
+          findings={findings} onAnnotate={onAnnotate} renderForm={renderForm} depth={0} />
       ))}
     </div>
   )

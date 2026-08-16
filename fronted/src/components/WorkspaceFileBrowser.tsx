@@ -5,13 +5,14 @@ import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github.css'
 import {
   ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode, FileJson, Loader2,
-  Eye, Code2, GitCompareArrows, Plus, Trash2, CheckCheck, MessageSquare, AlertTriangle, X,
+  Eye, Code2, GitCompareArrows, Trash2, CheckCheck, MessageSquare, AlertTriangle,
 } from 'lucide-react'
 import {
   getFlowFiles, getFlowFile, getAuditFindings, createAuditFinding, deleteAuditFinding, updateAuditFinding, getFileDiff, getStagesSchema,
   type FlowFile, type AuditFinding, type FileDiff,
 } from '@/api/flow'
 import JsonArtifactView from '@/components/JsonArtifactView'
+import InlineAnnotationForm from '@/components/InlineAnnotationForm'
 import { cn } from '@/lib/utils'
 
 interface TreeNode {
@@ -181,11 +182,12 @@ function FilePreview({ path, content }: { path: string; content: string }) {
   return <pre className="text-xs font-mono leading-5 text-slate-700 whitespace-pre-wrap break-words">{content}</pre>
 }
 
-/** 源码审阅视图：带行号，点行号添加审计意见；有意见的行高亮。 */
-function SourceView({ content, findings, onAnnotate }: {
+/** 源码审阅视图：带行号，点行号就地添加审计意见；有意见的行高亮。 */
+function SourceView({ content, findings, onAnnotate, renderForm }: {
   content: string
   findings: AuditFinding[]
   onAnnotate: (line: number) => void
+  renderForm: (lineKey: string) => React.ReactNode
 }) {
   const lines = content.split('\n')
   const byLine = new Map<number, AuditFinding[]>()
@@ -201,14 +203,17 @@ function SourceView({ content, findings, onAnnotate }: {
         const lineNo = i + 1
         const hits = byLine.get(lineNo) ?? []
         return (
-          <div key={i} className={cn('group flex hover:bg-slate-100/70', hits.length > 0 && 'bg-amber-50/60')}>
-            <button onClick={() => onAnnotate(lineNo)}
-              className="w-11 shrink-0 text-right pr-3 text-slate-300 group-hover:text-indigo-500 select-none"
-              title="点击添加审计意见">
-              {lineNo}
-            </button>
-            <span className="flex-1 whitespace-pre-wrap break-words text-slate-700">{line}</span>
-            {hits.length > 0 && <span className="shrink-0 pr-1 text-[10px] text-amber-600">{hits.length} 条意见</span>}
+          <div key={i}>
+            <div className={cn('group flex hover:bg-slate-100/70', hits.length > 0 && 'bg-amber-50/60')}>
+              <button onClick={() => onAnnotate(lineNo)}
+                className="w-11 shrink-0 text-right pr-3 text-slate-300 group-hover:text-indigo-500 select-none"
+                title="点击添加审计意见">
+                {lineNo}
+              </button>
+              <span className="flex-1 whitespace-pre-wrap break-words text-slate-700">{line}</span>
+              {hits.length > 0 && <span className="shrink-0 pr-1 text-[10px] text-amber-600">{hits.length} 条意见</span>}
+            </div>
+            {renderForm(String(lineNo))}
           </div>
         )
       })}
@@ -406,6 +411,25 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
     }
   }
 
+  // 就地渲染标注弹框：activeKey 命中当前标注的 ref/line 时，在元素正下方渲染。
+  function renderForm(activeKey: string): React.ReactNode {
+    if (!annotate || !stage) return null
+    const isActive = annotate.ref === activeKey || (annotate.line !== undefined && String(annotate.line) === activeKey)
+    if (!isActive) return null
+    return (
+      <InlineAnnotationForm
+        label={annotate.label}
+        severity={newSeverity}
+        onSeverity={setNewSeverity}
+        comment={newComment}
+        onComment={setNewComment}
+        busy={findingsBusy}
+        onSubmit={submitFinding}
+        onCancel={() => setAnnotate(null)}
+      />
+    )
+  }
+
   const tree = useMemo(() => buildTree(files), [files])
   const selectedFile = files.find(f => f.path === selected)
   const openFindings = findings.filter(f => f.status === 'open')
@@ -462,46 +486,17 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
                   </button>
                 </div>
               </div>
-              {/* 标注表单 */}
-              {annotate && stage && (
-                <div className="mx-4 mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <MessageSquare className="w-4 h-4 text-amber-500" />
-                    <span className="text-xs font-medium text-slate-700">审计标注：{annotate.label}（{selected}）</span>
-                    <button onClick={() => setAnnotate(null)} className="ml-auto text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
-                  </div>
-                  <div className="flex gap-1.5 mb-2">
-                    <button onClick={() => setNewSeverity('blocking')}
-                      className={cn('h-6 px-2 rounded text-[11px] font-medium border',
-                        newSeverity === 'blocking' ? 'bg-rose-100 text-rose-700 border-rose-200' : 'text-slate-500 border-slate-200')}>
-                      阻断
-                    </button>
-                    <button onClick={() => setNewSeverity('suggestion')}
-                      className={cn('h-6 px-2 rounded text-[11px] font-medium border',
-                        newSeverity === 'suggestion' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'text-slate-500 border-slate-200')}>
-                      建议
-                    </button>
-                  </div>
-                  <textarea value={newComment} onChange={e => setNewComment(e.target.value)} rows={2}
-                    placeholder="这条意见要 agent 怎么改？"
-                    className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400" />
-                  <div className="mt-2 flex justify-end gap-2">
-                    <button onClick={() => setAnnotate(null)} className="h-7 px-3 rounded text-xs text-slate-500 border border-slate-200">取消</button>
-                    <button onClick={submitFinding} disabled={findingsBusy || !newComment.trim()}
-                      className="inline-flex items-center gap-1 h-7 px-3 rounded text-xs font-medium bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50">
-                      {findingsBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}添加意见
-                    </button>
-                  </div>
-                </div>
-              )}
               <div className="p-4">
                 {diffMode && diff ? (
                   <DiffView diff={diff} />
                 ) : jsonStage && jsonSchema && parsedJson && !sourceMode ? (
                   <JsonArtifactView json={parsedJson} schema={jsonSchema} findings={findings}
-                    onAnnotate={(ref, label) => stage && setAnnotate({ ref, label })} />
+                    onAnnotate={(ref, label) => stage && setAnnotate({ ref, label })}
+                    renderForm={renderForm} />
                 ) : sourceMode || detectKind(selected) === 'text' ? (
-                  <SourceView content={content} findings={findings} onAnnotate={line => stage && setAnnotate({ line, label: `第 ${line} 行` })} />
+                  <SourceView content={content} findings={findings}
+                    onAnnotate={line => stage && setAnnotate({ line, label: `第 ${line} 行` })}
+                    renderForm={renderForm} />
                 ) : (
                   <FilePreview path={selected} content={content} />
                 )}
