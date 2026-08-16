@@ -271,7 +271,7 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
 
   // 审计意见（当前阶段）
   const [findings, setFindings] = useState<AuditFinding[]>([])
-  const [annotate, setAnnotate] = useState<{ ref?: string; line?: number; label: string } | null>(null)
+  const [annotate, setAnnotate] = useState<{ ref?: string; line?: number; label: string; editId?: string } | null>(null)
   const [newComment, setNewComment] = useState('')
   const [newSeverity, setNewSeverity] = useState<'blocking' | 'suggestion'>('suggestion')
   const [findingsBusy, setFindingsBusy] = useState(false)
@@ -374,14 +374,32 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
     }
   }
 
+  function startAnnotate(ref: string | undefined, line: number | undefined, label: string) {
+    if (!stage || !selected) return
+    // 同一处已有意见 → 带出内容进入编辑；否则新建。
+    const existing = findings.find(f => f.path === selected && (
+      (ref !== undefined && f.ref === ref) || (line !== undefined && f.line === line)
+    ))
+    setAnnotate({ ref, line, label, editId: existing?.id })
+    if (existing) {
+      setNewComment(existing.comment); setNewSeverity(existing.severity)
+    } else {
+      setNewComment(''); setNewSeverity('suggestion')
+    }
+  }
+
   async function submitFinding() {
     if (!selected || !annotate || !newComment.trim() || !versionId || !stage) return
     setFindingsBusy(true)
     try {
-      await createAuditFinding(versionId, {
-        stage, path: selected, line: annotate.line ?? null, ref: annotate.ref ?? null,
-        severity: newSeverity, comment: newComment.trim(),
-      })
+      if (annotate.editId) {
+        await updateAuditFinding(versionId, annotate.editId, { severity: newSeverity, comment: newComment.trim() })
+      } else {
+        await createAuditFinding(versionId, {
+          stage, path: selected, line: annotate.line ?? null, ref: annotate.ref ?? null,
+          severity: newSeverity, comment: newComment.trim(),
+        })
+      }
       await reloadFindings()
       setAnnotate(null); setNewComment(''); setNewSeverity('suggestion')
     } catch (e) {
@@ -513,11 +531,11 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
                   <DiffView diff={diff} />
                 ) : jsonStage && jsonSchema && parsedJson && !sourceMode ? (
                   <JsonArtifactView json={parsedJson} schema={jsonSchema} findings={findings}
-                    onAnnotate={(ref, label) => stage && setAnnotate({ ref, label })}
+                    onAnnotate={(ref, label) => startAnnotate(ref, undefined, label)}
                     renderForm={renderForm} />
                 ) : sourceMode || detectKind(selected) === 'text' ? (
                   <SourceView content={content} findings={findings}
-                    onAnnotate={line => stage && setAnnotate({ line, label: `第 ${line} 行` })}
+                    onAnnotate={line => startAnnotate(undefined, line, `第 ${line} 行`)}
                     renderForm={renderForm} />
                 ) : (
                   <FilePreview path={selected} content={content} />

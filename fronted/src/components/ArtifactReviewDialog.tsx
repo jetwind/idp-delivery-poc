@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { Loader2 } from 'lucide-react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import {
-  getFlowFile, getStagesSchema, getAuditFindings, createAuditFinding,
+  getFlowFile, getStagesSchema, getAuditFindings, createAuditFinding, updateAuditFinding,
   type AuditFinding,
 } from '@/api/flow'
 import JsonArtifactView from '@/components/JsonArtifactView'
@@ -32,7 +32,7 @@ export default function ArtifactReviewDialog({ open, onClose, threadId, versionI
   const [schema, setSchema] = useState<Record<string, unknown> | null>(null)
   const [findings, setFindings] = useState<AuditFinding[]>([])
   const [loading, setLoading] = useState(false)
-  const [annotate, setAnnotate] = useState<{ ref?: string; line?: number; label: string } | null>(null)
+  const [annotate, setAnnotate] = useState<{ ref?: string; line?: number; label: string; editId?: string } | null>(null)
   const [comment, setComment] = useState('')
   const [severity, setSeverity] = useState<'blocking' | 'suggestion'>('suggestion')
   const [busy, setBusy] = useState(false)
@@ -66,14 +66,31 @@ export default function ArtifactReviewDialog({ open, onClose, threadId, versionI
     try { parsedJson = JSON.parse(content) } catch { parsedJson = null }
   }
 
+  function startAnnotate(ref: string | undefined, line: number | undefined, label: string) {
+    if (!path) return
+    const existing = findings.find(f => f.path === path && (
+      (ref !== undefined && f.ref === ref) || (line !== undefined && f.line === line)
+    ))
+    setAnnotate({ ref, line, label, editId: existing?.id })
+    if (existing) {
+      setComment(existing.comment); setSeverity(existing.severity)
+    } else {
+      setComment(''); setSeverity('suggestion')
+    }
+  }
+
   async function submit() {
-    if (!path || !comment.trim()) return
+    if (!path || !annotate || !comment.trim()) return
     setBusy(true)
     try {
-      await createAuditFinding(versionId, {
-        stage, path, line: annotate?.line ?? null, ref: annotate?.ref ?? null,
-        severity, comment: comment.trim(),
-      })
+      if (annotate.editId) {
+        await updateAuditFinding(versionId, annotate.editId, { severity, comment: comment.trim() })
+      } else {
+        await createAuditFinding(versionId, {
+          stage, path, line: annotate.line ?? null, ref: annotate.ref ?? null,
+          severity, comment: comment.trim(),
+        })
+      }
       const fd = await getAuditFindings(versionId, stage)
       setFindings(fd.findings)
       setAnnotate(null); setComment(''); setSeverity('suggestion')
@@ -112,7 +129,7 @@ export default function ArtifactReviewDialog({ open, onClose, threadId, versionI
             <div className="flex items-center gap-2 text-xs text-slate-400 py-6"><Loader2 className="w-4 h-4 animate-spin" />加载中…</div>
           ) : isArtifact && schema && parsedJson ? (
             <JsonArtifactView json={parsedJson} schema={schema} findings={findings}
-              onAnnotate={(ref, label) => setAnnotate({ ref, label })}
+              onAnnotate={(ref, label) => startAnnotate(ref, undefined, label)}
               renderForm={renderForm} />
           ) : path?.endsWith('.md') ? (
             <div className="markdown-body text-[13px] leading-6 text-slate-700">
