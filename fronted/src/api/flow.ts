@@ -519,3 +519,67 @@ export interface CockpitData {
 export function getCockpit(): Promise<CockpitData> {
   return flowJson('/cockpit')
 }
+
+// ---- 产出文件审计意见 + 基线 diff ----
+
+export interface AuditFinding {
+  id: string
+  version_id: string
+  stage: string
+  path: string
+  line: number | null
+  severity: 'blocking' | 'suggestion'
+  comment: string
+  status: 'open' | 'resolved'
+  created_at: number
+  updated_at: number
+}
+
+export interface FileDiffLine {
+  type: 'context' | 'add' | 'del'
+  text: string
+}
+
+export interface FileDiff {
+  path: string
+  has_baseline: boolean
+  baseline_name: string | null
+  diff: FileDiffLine[]
+  is_new: boolean
+  is_unchanged: boolean
+}
+
+/** 某版本的全部审计意见（可按阶段过滤）。 */
+export function getAuditFindings(versionId: string, stage?: string): Promise<{ findings: AuditFinding[] }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit${stage ? `?stage=${encodeURIComponent(stage)}` : ''}`)
+}
+
+/** 新建一条审计意见。 */
+export function createAuditFinding(
+  versionId: string, body: { stage: string; path: string; line: number | null; severity: 'blocking' | 'suggestion'; comment: string },
+): Promise<{ finding: AuditFinding }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** 更新审计意见（status/severity/comment/line）。 */
+export function updateAuditFinding(
+  versionId: string, findingId: string, body: Partial<Pick<AuditFinding, 'line' | 'severity' | 'comment' | 'status'>>,
+): Promise<{ finding: AuditFinding }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit/${encodeURIComponent(findingId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+/** 删除一条审计意见。 */
+export function deleteAuditFinding(versionId: string, findingId: string): Promise<{ ok: boolean }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit/${encodeURIComponent(findingId)}`, { method: 'DELETE' })
+}
+
+/** 某文件相对基线的结构化行 diff。 */
+export function getFileDiff(versionId: string, path: string): Promise<FileDiff> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/diff?path=${encodeURIComponent(path)}`)
+}

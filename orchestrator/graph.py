@@ -581,14 +581,31 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
     return state
 
 
+def _format_findings(findings: list[dict[str, Any]]) -> str:
+    """把结构化审计意见格式化成给 agent 的逐条修改指令。"""
+    lines: list[str] = []
+    for f in findings:
+        path = f.get("path") or "?"
+        line = f.get("line")
+        severity = f.get("severity") or "suggestion"
+        sev = "阻断" if severity == "blocking" else "建议"
+        comment = str(f.get("comment") or "").strip()
+        loc = path + (f" 第{line}行" if line else "")
+        lines.append(f"- [{sev}] {loc}：{comment}")
+    return "\n".join(lines)
+
+
 async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
     stage = STAGES[state["stage_index"]]
     decision = interrupt({"type": "gate", "stage": stage["name"]})
     action = "reject"
     feedback = ""
+    findings: list[dict[str, Any]] = []
     if isinstance(decision, dict):
         action = decision.get("action") or "reject"
         feedback = str(decision.get("feedback") or "").strip()
+        raw_findings = decision.get("findings") or []
+        findings = [f for f in raw_findings if isinstance(f, dict) and str(f.get("comment") or "").strip()]
     elif decision == "approve":
         action = "approve"
 
@@ -630,6 +647,11 @@ async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
             f"先读取现有产物（{out_json}" + (f" 与 {md_files}" if md_files else "") + "），"
             f"只改反馈涉及的部分，其余已确认内容保持不变；改完更新对应文件后交回。"
         )
+        findings_text = _format_findings(findings)
+        if findings_text:
+            prompt += (
+                f"\n\n【逐条审计意见 · 请针对性修改，只改涉及处，其余保持不动】\n{findings_text}"
+            )
         await client.prompt(state["current_session_id"], prompt)
     return state
 

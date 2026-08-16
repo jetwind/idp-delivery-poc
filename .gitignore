@@ -43,3 +43,6 @@ standards.db
 checkpoints.db
 checkpoints.db-wal
 checkpoints.db-shm
+
+# 版本交付产物快照（基线 diff 用，运行时数据）
+snapshots/

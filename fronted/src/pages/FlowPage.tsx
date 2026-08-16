@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { continueFlow, getFlowEvents, getFlowState, getVersion, resumeFlow, startVersionFlow, type FlowEvent, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt, type TodoItem, type Version } from '@/api/flow'
+import { continueFlow, getAuditFindings, getFlowEvents, getFlowState, getVersion, resumeFlow, startVersionFlow, type AuditFinding, type FlowEvent, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt, type TodoItem, type Version } from '@/api/flow'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import WorkspaceFileBrowser from '@/components/WorkspaceFileBrowser'
-import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare, ListChecks, Circle } from 'lucide-react'
+import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare, ListChecks, Circle, History, ChevronDown } from 'lucide-react'
 
 const STAGES = [
   { id: 'requirements', name: '01 需求' },
@@ -32,6 +32,8 @@ export default function FlowPage() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [running, setRunning] = useState(false)
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
+  const [auditTrail, setAuditTrail] = useState<AuditFinding[]>([])
+  const [trailOpen, setTrailOpen] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const seenRef = useRef<Set<string>>(new Set())
   const eventsBusyRef = useRef(false)
@@ -55,6 +57,16 @@ export default function FlowPage() {
     }).catch(() => { /* 版本不存在则停留在输入态 */ })
     return () => { alive = false }
   }, [vid])
+
+  // 版本审计留痕：加载该版本全部阶段的审计意见（跨阶段回看）。
+  useEffect(() => {
+    if (!vid) return
+    let alive = true
+    getAuditFindings(vid).then(r => {
+      if (alive) setAuditTrail(r.findings)
+    }).catch(() => { /* 忽略 */ })
+    return () => { alive = false }
+  }, [vid, snapshot?.stage_index])
 
   // 启动后轮询：状态单独拉（快，pending 立即生效）；日志单独异步更新（慢也不阻塞状态）。
   useEffect(() => {
@@ -153,7 +165,18 @@ export default function FlowPage() {
   async function submitGate(decision: 'approve' | 'revise') {
     setBusy(true); setError(null)
     try {
-      const answer = decision === 'approve' ? 'approve' : { action: 'revise', feedback: gateFeedback.trim() }
+      let answer: unknown = 'approve'
+      if (decision === 'revise') {
+        const stageId = snapshot ? STAGES[snapshot.stage_index]?.id : undefined
+        const findings = stageId && vid
+          ? (await getAuditFindings(vid, stageId)).findings.filter(f => f.status === 'open')
+          : []
+        answer = {
+          action: 'revise',
+          feedback: gateFeedback.trim(),
+          findings: findings.map(f => ({ path: f.path, line: f.line, severity: f.severity, comment: f.comment })),
+        }
+      }
       await resumeFlow(threadId!, answer)
       setSnapshot(s => s ? { ...s, pending: null, validation: { status: 'pending', attempts: 0, error: null } } : s)
       setGateFeedback('')
@@ -446,8 +469,57 @@ export default function FlowPage() {
         </div>
       )}
 
-      {/* 工作区文件浏览器 */}
-      {threadId && <WorkspaceFileBrowser threadId={threadId} />}
+      {/* 版本审计留痕（跨阶段回看） */}
+      {vid && auditTrail.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
+          <button onClick={() => setTrailOpen(o => !o)}
+            className="w-full flex items-center gap-2 px-5 py-3 border-b border-slate-100 text-left">
+            <History className="w-4 h-4 text-indigo-500" />
+            <span className="text-[13px] font-semibold text-slate-800">版本审计留痕</span>
+            <span className="text-xs text-slate-400">{auditTrail.length} 条意见 · {auditTrail.filter(f => f.status === 'open').length} 条未处理</span>
+            <ChevronDown className={cn('ml-auto w-4 h-4 text-slate-400 transition-transform', trailOpen && 'rotate-180')} />
+          </button>
+          {trailOpen && (
+            <div className="px-5 py-3 space-y-2 max-h-[360px] overflow-y-auto">
+              {[...new Set(auditTrail.map(f => f.stage))].map(sid => {
+                const items = auditTrail.filter(f => f.stage === sid)
+                return (
+                  <div key={sid}>
+                    <div className="text-[11px] font-semibold text-slate-500 mb-1">{STAGES.find(s => s.id === sid)?.name ?? sid}</div>
+                    <div className="space-y-1">
+                      {items.map(f => (
+                        <div key={f.id} className={cn('flex items-start gap-2 rounded border px-3 py-1.5 text-xs',
+                          f.status === 'resolved' ? 'border-slate-100 opacity-60' : 'border-amber-100 bg-amber-50/40')}>
+                          {f.severity === 'blocking'
+                            ? <ShieldCheck className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
+                            : <MessageSquare className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />}
+                          <div className="min-w-0 flex-1">
+                            <span className="font-mono text-slate-500">{f.path}{f.line ? ` : ${f.line}` : ''}</span>
+                            <span className={cn('ml-1.5 px-1 rounded text-[10px]', f.severity === 'blocking' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700')}>
+                              {f.severity === 'blocking' ? '阻断' : '建议'}
+                            </span>
+                            <span className={cn('ml-1.5 text-[10px]', f.status === 'open' ? 'text-amber-600' : 'text-slate-400')}>{f.status === 'open' ? '未处理' : '已处理'}</span>
+                            <div className="text-slate-700 mt-0.5">{f.comment}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 工作区文件浏览器（含审计标注 + 基线 diff） */}
+      {threadId && vid && (
+        <WorkspaceFileBrowser
+          threadId={threadId}
+          versionId={vid}
+          stage={snapshot ? STAGES[snapshot.stage_index]?.id : undefined}
+        />
+      )}
 
       {/* 实时日志（放最下面，观察性） */}
       {threadId && (

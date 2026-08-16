@@ -12,8 +12,10 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import os
+import shutil
 import subprocess
 import uuid
 from contextlib import asynccontextmanager
@@ -34,6 +36,7 @@ import activity_store
 import config_store
 import schema_store
 import project_store
+import audit_store
 
 # 交付文件夹根目录（orchestrator/ 的上一级），git URL clone 到这里下的 projects/。
 DELIVERY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -86,6 +89,8 @@ config_store.init_db()
 schema_store.init_db()
 # 交付项目（进入流水线的入口）：SQLite。
 project_store.init_db()
+# 产出文件审计意见：SQLite。
+audit_store.init_db()
 
 
 def _is_git_url(value: str) -> bool:
@@ -463,7 +468,7 @@ async def version_get(vid: str) -> dict[str, Any]:
 
 @app.post("/versions/{vid}/deliver")
 async def version_deliver(vid: str) -> dict[str, Any]:
-    """标记版本已交付：落库状态 + 尽力在项目 git 仓库打 tag。"""
+    """标记版本已交付：落库状态 + 尽力打 git tag + 快照产物（供后续基线 diff）。"""
     ver = project_store.get_version(vid)
     if ver is None:
         raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
@@ -472,7 +477,161 @@ async def version_deliver(vid: str) -> dict[str, Any]:
     tag = ver["name"]
     _git_tag(cwd, tag)
     project_store.mark_version_delivered(vid, tag)
+    _snapshot_version(vid)
     return {"id": vid, "name": tag, "ok": True}
+
+
+def _snapshot_version(vid: str) -> bool:
+    """把某版本的交付产物快照到 snapshots/<vid>/（排除依赖/构建目录），供基线 diff。"""
+    ver = project_store.get_version(vid)
+    if ver is None:
+        return False
+    proj = project_store.get_project(ver["project_id"])
+    cwd = (proj or {}).get("cwd", "")
+    if not cwd or not os.path.isdir(cwd):
+        return False
+    snap_root = os.path.join(DELIVERY_ROOT, "snapshots", vid)
+    shutil.rmtree(snap_root, ignore_errors=True)
+    for f in _list_files(cwd):
+        src = os.path.join(cwd, f["path"])
+        dst = os.path.join(snap_root, f["path"])
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        try:
+            shutil.copy2(src, dst)
+        except OSError:
+            continue
+    return True
+
+
+def _resolve_rel(base: str, rel: str) -> str:
+    """把相对路径解析到 base 内的绝对路径，防逃逸；越界抛 400。"""
+    rel = rel.replace("\\", "/").lstrip("/")
+    base_abs = os.path.abspath(base)
+    full = os.path.abspath(os.path.join(base_abs, rel))
+    if full != base_abs and not full.startswith(base_abs + os.sep):
+        raise HTTPException(status_code=400, detail="非法路径")
+    return full
+
+
+def _read_text_or_none(full: str) -> str | None:
+    try:
+        with open(full, encoding="utf-8") as f:
+            return f.read()
+    except (FileNotFoundError, OSError, UnicodeDecodeError):
+        return None
+
+
+@app.get("/versions/{vid}/diff")
+async def version_diff(vid: str, path: str) -> dict[str, Any]:
+    """某文件相对基线的结构化行 diff（v1.1 审计 v1.0 的增量）。"""
+    ver = project_store.get_version(vid)
+    if ver is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
+    baseline = project_store.get_version_baseline(vid)
+    if baseline is None:
+        return {"path": path, "has_baseline": False, "baseline_name": None, "diff": [], "is_new": True, "is_unchanged": False}
+    proj = project_store.get_project(ver["project_id"])
+    cwd = (proj or {}).get("cwd", "")
+    cur_path = _resolve_rel(cwd, path)
+    snap_path = _resolve_rel(os.path.join(DELIVERY_ROOT, "snapshots", baseline["id"]), path)
+    new = _read_text_or_none(cur_path)
+    if new is None:
+        raise HTTPException(status_code=404, detail=f"文件不存在：{path}")
+    old = _read_text_or_none(snap_path)
+    is_new = old is None
+    old_lines = [] if old is None else old.splitlines()
+    new_lines = new.splitlines()
+    diff: list[dict[str, str]] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_lines, new_lines).get_opcodes():
+        if tag == "equal":
+            for line in old_lines[i1:i2]:
+                diff.append({"type": "context", "text": line})
+        elif tag == "delete":
+            for line in old_lines[i1:i2]:
+                diff.append({"type": "del", "text": line})
+        elif tag == "insert":
+            for line in new_lines[j1:j2]:
+                diff.append({"type": "add", "text": line})
+        elif tag == "replace":
+            for line in old_lines[i1:i2]:
+                diff.append({"type": "del", "text": line})
+            for line in new_lines[j1:j2]:
+                diff.append({"type": "add", "text": line})
+    return {
+        "path": path,
+        "has_baseline": True,
+        "baseline_name": baseline["name"],
+        "diff": diff,
+        "is_new": is_new,
+        "is_unchanged": old == new,
+    }
+
+
+# ---- 产出文件审计意见 CRUD ----
+
+class AuditFindingRequest(BaseModel):
+    stage: str
+    path: str
+    line: int | None = None
+    severity: str = "suggestion"
+    comment: str
+
+
+class AuditFindingUpdate(BaseModel):
+    line: int | None = None
+    severity: str | None = None
+    comment: str | None = None
+    status: str | None = None
+
+
+@app.get("/versions/{vid}/audit")
+async def audit_list(vid: str, stage: str | None = None) -> dict[str, Any]:
+    if project_store.get_version(vid) is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
+    return {"findings": audit_store.list_findings(vid, stage)}
+
+
+@app.post("/versions/{vid}/audit")
+async def audit_create(vid: str, req: AuditFindingRequest) -> dict[str, Any]:
+    if project_store.get_version(vid) is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
+    if req.severity not in audit_store.SEVERITY:
+        raise HTTPException(status_code=400, detail=f"非法严重度：{req.severity}")
+    if not req.comment.strip():
+        raise HTTPException(status_code=400, detail="审计意见不能为空")
+    finding = audit_store.create_finding(vid, req.stage, req.path, req.line, req.severity, req.comment.strip())
+    return {"finding": finding}
+
+
+@app.patch("/versions/{vid}/audit/{fid}")
+async def audit_update(vid: str, fid: str, req: AuditFindingUpdate) -> dict[str, Any]:
+    finding = audit_store.get_finding(fid)
+    if finding is None or finding["version_id"] != vid:
+        raise HTTPException(status_code=404, detail="审计意见不存在")
+    fields: dict[str, Any] = {}
+    if req.line is not None:
+        fields["line"] = req.line
+    if req.severity is not None:
+        if req.severity not in audit_store.SEVERITY:
+            raise HTTPException(status_code=400, detail=f"非法严重度：{req.severity}")
+        fields["severity"] = req.severity
+    if req.comment is not None:
+        fields["comment"] = req.comment.strip()
+    if req.status is not None:
+        if req.status not in audit_store.STATUS:
+            raise HTTPException(status_code=400, detail=f"非法状态：{req.status}")
+        fields["status"] = req.status
+    updated = audit_store.update_finding(fid, **fields)
+    return {"finding": updated}
+
+
+@app.delete("/versions/{vid}/audit/{fid}")
+async def audit_delete(vid: str, fid: str) -> dict[str, Any]:
+    finding = audit_store.get_finding(fid)
+    if finding is None or finding["version_id"] != vid:
+        raise HTTPException(status_code=404, detail="审计意见不存在")
+    audit_store.delete_finding(fid)
+    return {"ok": True}
 
 
 # ---- AI 驾驶舱（全局汇总：所有项目/版本的流水线实时状态）----
