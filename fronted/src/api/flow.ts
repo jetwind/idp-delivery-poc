@@ -54,6 +54,8 @@ export interface FlowSnapshot {
   cwd: string | null
   /** 后台图运行错误（有则显示）。 */
   error: string | null
+  /** 后台图执行任务是否还在跑（false = 可能因编排层重启而孤儿化）。 */
+  flow_running: boolean
   /** 阶段产物 schema 校验状态（结构化产物子步骤）。 */
   validation: {
     status: 'pending' | 'passed' | 'retrying' | 'failed'
@@ -170,6 +172,11 @@ export function resumeFlow(threadId: string, answer: unknown): Promise<FlowSnaps
     method: 'POST',
     body: JSON.stringify({ answer }),
   })
+}
+
+/** 继续一个因编排层重启而卡在非 interrupt 的流程（从上次 checkpoint 推进）。 */
+export function continueFlow(threadId: string): Promise<FlowSnapshot> {
+  return flowJson(`/flow/continue/${threadId}`, { method: 'POST' })
 }
 
 /** 阶段列表（用于渲染阶段条）。 */

@@ -304,6 +304,7 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
         "current_session_id": values.get("current_session_id"),
         "cwd": values.get("cwd"),
         "error": _flow_errors.get(thread_id),
+        "flow_running": thread_id in _flow_tasks and not _flow_tasks[thread_id].done(),
         "validation": {
             "status": values.get("validation_status", "pending"),
             "attempts": values.get("validation_attempts", 0),
@@ -445,6 +446,19 @@ async def resume(thread_id: str, req: ResumeRequest) -> dict[str, Any]:
     _flow_errors.pop(thread_id, None)
     _flow_tasks[thread_id] = asyncio.create_task(
         _run_flow(thread_id, Command(resume=req.answer), _config(thread_id)),
+    )
+    return await _snapshot(thread_id)
+
+
+@app.post("/flow/continue/{thread_id}")
+async def continue_flow(thread_id: str) -> dict[str, Any]:
+    """继续一个「孤儿化」的流程（编排层重启后，停在非 interrupt 的 checkpoint）。
+
+    用空输入重新 ainvoke，LangGraph 从上次 checkpoint 继续推进到下一个 interrupt。
+    """
+    _flow_errors.pop(thread_id, None)
+    _flow_tasks[thread_id] = asyncio.create_task(
+        _run_flow(thread_id, None, _config(thread_id)),
     )
     return await _snapshot(thread_id)
 

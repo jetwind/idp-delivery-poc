@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { getFlowEvents, getFlowFile, getFlowFiles, getFlowState, getProject, resumeFlow, startFlow, startProjectFlow, type FlowEvent, type FlowFile, type FlowQuestion, type FlowSnapshot, type Project, type QuestionInterrupt, type TodoItem } from '@/api/flow'
+import { continueFlow, getFlowEvents, getFlowFile, getFlowFiles, getFlowState, getProject, resumeFlow, startFlow, startProjectFlow, type FlowEvent, type FlowFile, type FlowQuestion, type FlowSnapshot, type Project, type QuestionInterrupt, type TodoItem } from '@/api/flow'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -121,6 +121,19 @@ export default function FlowPage() {
       if (window.confirm('重新开始会启动一条新的流水线，确认？')) handleStart()
     } else {
       reset()
+    }
+  }
+
+  // 继续一个因编排层重启而「孤儿化」的流程（从上次 checkpoint 推进到下一个 interrupt）。
+  async function handleContinue() {
+    if (!threadId) return
+    setBusy(true); setError(null)
+    try {
+      await continueFlow(threadId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -281,11 +294,19 @@ export default function FlowPage() {
         <div className="space-y-4">
           {!snapshot.done && !pending && (
             <div className="bg-white rounded-lg border border-indigo-100 bg-indigo-50/40 px-5 py-4 flex items-center gap-3">
-              <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
-              <div>
-                <div className="text-[13px] font-medium text-slate-800">「{snapshot.stage}」阶段执行中…</div>
-                <div className="text-xs text-slate-500 mt-0.5">harness agent 正在真实干活，稍候会出现待确认项</div>
+              {snapshot.flow_running
+                ? <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
+                : <TriangleAlert className="w-4 h-4 text-amber-500 shrink-0" />}
+              <div className="flex-1">
+                <div className="text-[13px] font-medium text-slate-800">「{snapshot.stage}」阶段{snapshot.flow_running ? '执行中…' : '已暂停'}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{snapshot.flow_running ? 'harness agent 正在真实干活，稍候会出现待确认项' : '流程可能因服务重启而暂停，点击「继续执行」从上次进度恢复。'}</div>
               </div>
+              {!snapshot.flow_running && (
+                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" disabled={busy} onClick={handleContinue}>
+                  {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}
+                  继续执行
+                </Button>
+              )}
             </div>
           )}
 
