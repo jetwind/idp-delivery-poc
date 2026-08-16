@@ -401,6 +401,8 @@ export interface Version {
   status: '进行中' | '已交付' | '已归档'
   git_ref: string | null
   note: string
+  /** 基线版本 id（v1.1 基于 v1.0；首个版本为 null）。 */
+  baseline_version_id: string | null
   created_at: number
   updated_at: number
 }

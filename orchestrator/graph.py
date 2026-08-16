@@ -47,6 +47,9 @@ class FlowState(TypedDict, total=False):
     gate_action: str
     gate_feedback: str
     gate_round: int
+    # 版本增量交付：当前版本名 + 基线版本信息（v1.1 基于 v1.0 继续叠加）。
+    version_name: str | None
+    baseline: dict[str, Any] | None
 
 
 STAGES: list[dict[str, Any]] = [
@@ -187,6 +190,45 @@ def clean_stage_title(stage: dict[str, Any]) -> str:
     return task.strip() or stage.get("name", "")
 
 
+def _version_context(state: FlowState) -> str:
+    """非需求阶段的通用「增量交付」提示（有基线时返回，无基线返回空串）。"""
+    baseline = state.get("baseline")
+    name = state.get("version_name")
+    if not baseline:
+        return ""
+    return (
+        f"\n\n【版本增量交付说明】本次是 {name or '新版本'} 版本，基于已交付基线 {baseline.get('version_name', '?')}"
+        f"（git: {baseline.get('git_ref', '?')}）增量演进。工作区现有文件是基线已交付内容，请只做【增量改动】："
+        "保留基线功能与内容不变，只新增/修改本次需求涉及的部分，不要重写或删除基线内容。"
+    )
+
+
+def _requirements_version_context(state: FlowState) -> str:
+    """需求阶段的增量提示：在基线需求规格上增量演进，末尾追加变更记录。"""
+    baseline = state.get("baseline") or {}
+    name = state.get("version_name") or "新版本"
+    return (
+        f"\n\n【版本增量交付说明】\n"
+        f"本次是 {name} 版本，基于已交付基线 {baseline.get('version_name', '?')}（git: {baseline.get('git_ref', '?')}）。\n"
+        "工作区里的 specs/requirements.md 是基线已交付的需求规格，请在其上【增量演进】，而不是当空项目重做：\n"
+        "1. 保留基线已交付的功能需求与验收标准不变。\n"
+        "2. 只新增/修改/删除本次需求涉及的内容。\n"
+        f"3. 文档末尾新增「## 变更记录（{name}）」小节，逐条标注 新增/修改/删除。\n\n"
+        f"【基线原始需求】\n{baseline.get('requirement_text', '')}\n\n"
+        f"【本次新需求】\n{state['requirement_text']}"
+    )
+
+
+def _acceptance_context(state: FlowState) -> str:
+    """04/05 的回归验收要求：build/test 覆盖全量（含基线），确保不回归。"""
+    if not state.get("baseline"):
+        return ""
+    return (
+        "\n【回归验收要求】本版本基于基线增量开发，build/test 命令必须覆盖全量代码（含基线功能），"
+        "确保基线功能不回归；在产物文档中分别说明基线功能回归验证结果。"
+    )
+
+
 GIT_TIMEOUT_SECONDS = 60
 
 
@@ -273,8 +315,16 @@ async def start_stage(state: FlowState, client: HarnessClient) -> FlowState:
         input_text = collect_input_files(state, stage)
         if input_text:
             prompt = prompt + "\n" + input_text
-        if stage["id"] == "requirements":
-            prompt = prompt + f"\n\n【用户原始需求】\n{state['requirement_text']}"
+        sid = stage["id"]
+        if sid == "requirements":
+            if state.get("baseline"):
+                prompt += _requirements_version_context(state)
+            else:
+                prompt += f"\n\n【用户原始需求】\n{state['requirement_text']}"
+        else:
+            prompt += _version_context(state)
+            if sid in ("coding", "testing"):
+                prompt += _acceptance_context(state)
         # 结构化产物要求：有 schema 的阶段，要求 agent 写 JSON 产物（图侧校验的正式产物）。
         schema = schema_store.get_schema(stage["id"])
         out_json = schema_store.STAGE_OUTPUT_JSON.get(stage["id"])

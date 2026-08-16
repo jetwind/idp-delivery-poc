@@ -51,6 +51,7 @@ def init_db() -> None:
             "status TEXT NOT NULL DEFAULT '进行中', "
             "git_ref TEXT, "
             "note TEXT DEFAULT '', "
+            "baseline_version_id TEXT, "
             "created_at INTEGER NOT NULL, "
             "updated_at INTEGER NOT NULL"
             ")",
@@ -59,6 +60,10 @@ def init_db() -> None:
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
         if "current_version_id" not in cols:
             conn.execute("ALTER TABLE projects ADD COLUMN current_version_id TEXT")
+        # 兼容旧库：补 baseline_version_id 列（版本基线：v1.1 的上一版本）。
+        vcols = [r["name"] for r in conn.execute("PRAGMA table_info(versions)").fetchall()]
+        if "baseline_version_id" not in vcols:
+            conn.execute("ALTER TABLE versions ADD COLUMN baseline_version_id TEXT")
         # 迁移：老项目（无版本记录）→ 补一个 v1.0.0 版本，挂接其旧 thread/需求。
         projects = conn.execute("SELECT * FROM projects").fetchall()
         for p in projects:
@@ -75,6 +80,22 @@ def init_db() -> None:
                 (vid, p["id"], "v1.0.0", p["requirement_text"], p["thread_id"], p["stage_index"] or 0, "进行中", now, now),
             )
             conn.execute("UPDATE projects SET current_version_id=? WHERE id=?", (vid, p["id"]))
+        # 迁移：为「非首个版本但无基线」的版本补基线（指向同项目按创建顺序的上一版本）。
+        for p in conn.execute("SELECT id FROM projects").fetchall():
+            vers = conn.execute(
+                "SELECT id FROM versions WHERE project_id=? ORDER BY created_at ASC, id ASC",
+                (p["id"],),
+            ).fetchall()
+            prev = None
+            for row in vers:
+                cur = conn.execute(
+                    "SELECT baseline_version_id FROM versions WHERE id=?", (row["id"],),
+                ).fetchone()
+                if prev is not None and (cur is None or not cur["baseline_version_id"]):
+                    conn.execute(
+                        "UPDATE versions SET baseline_version_id=? WHERE id=?", (prev, row["id"]),
+                    )
+                prev = row["id"]
         conn.commit()
     finally:
         conn.close()
@@ -193,10 +214,17 @@ def create_version(project_id: str, name: str, requirement_text: str, note: str)
     name = name.strip() or suggest_version_name(project_id)
     conn = _conn()
     try:
+        # 基线 = 创建时的当前版本（v1.1 基于 v1.0 继续叠加；首个版本无基线）。
+        baseline_id = None
+        proj = conn.execute(
+            "SELECT current_version_id FROM projects WHERE id=?", (project_id,),
+        ).fetchone()
+        if proj:
+            baseline_id = proj["current_version_id"]
         conn.execute(
-            "INSERT INTO versions(id, project_id, name, requirement_text, thread_id, stage_index, status, git_ref, note, created_at, updated_at) "
-            "VALUES(?,?,?,?,NULL,0,'进行中',NULL,?,?,?)",
-            (vid, project_id, name, requirement_text, note, now, now),
+            "INSERT INTO versions(id, project_id, name, requirement_text, thread_id, stage_index, status, git_ref, note, baseline_version_id, created_at, updated_at) "
+            "VALUES(?,?,?,?,NULL,0,'进行中',NULL,?,?,?,?)",
+            (vid, project_id, name, requirement_text, note, baseline_id, now, now),
         )
         conn.execute(
             "UPDATE projects SET current_version_id=?, updated_at=? WHERE id=?",
@@ -213,6 +241,24 @@ def get_version(vid: str) -> dict | None:
     try:
         row = conn.execute("SELECT * FROM versions WHERE id=?", (vid,)).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_version_baseline(vid: str) -> dict | None:
+    """读某版本的基线版本信息（{id, name, git_ref, requirement_text}）；无基线返回 None。"""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT baseline_version_id FROM versions WHERE id=?", (vid,),
+        ).fetchone()
+        if not row or not row["baseline_version_id"]:
+            return None
+        b = conn.execute(
+            "SELECT id, name, git_ref, requirement_text FROM versions WHERE id=?",
+            (row["baseline_version_id"],),
+        ).fetchone()
+        return dict(b) if b else None
     finally:
         conn.close()
 

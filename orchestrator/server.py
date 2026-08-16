@@ -313,7 +313,10 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
     }
 
 
-async def _start_flow(requirement_text: str, cwd_raw: str) -> dict[str, Any]:
+async def _start_flow(
+    requirement_text: str, cwd_raw: str,
+    version_name: str | None = None, baseline: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     thread_id = str(uuid.uuid4())
     cwd = _resolve_cwd(cwd_raw)
     initial: dict[str, Any] = {
@@ -321,6 +324,8 @@ async def _start_flow(requirement_text: str, cwd_raw: str) -> dict[str, Any]:
         "cwd": cwd,
         "stage_index": 0,
         "artifacts": {},
+        "version_name": version_name,
+        "baseline": baseline,
     }
     _flow_errors.pop(thread_id, None)
     _flow_tasks[thread_id] = asyncio.create_task(_run_flow(thread_id, initial, _config(thread_id)))
@@ -360,7 +365,19 @@ def _git_tag(cwd: str, tag: str) -> bool:
 
 async def _start_version_flow(ver: dict) -> dict[str, Any]:
     proj = project_store.get_project(ver["project_id"])
-    snap = await _start_flow(ver["requirement_text"], (proj or {}).get("cwd", ""))
+    # 基线：该版本基于的上一版本（v1.1 基于 v1.0），注入流水线用于「增量交付」提示。
+    baseline = None
+    bv = project_store.get_version_baseline(ver["id"])
+    if bv:
+        baseline = {
+            "version_name": bv["name"],
+            "git_ref": bv.get("git_ref") or bv["name"],
+            "requirement_text": bv["requirement_text"],
+        }
+    snap = await _start_flow(
+        ver["requirement_text"], (proj or {}).get("cwd", ""),
+        version_name=ver["name"], baseline=baseline,
+    )
     project_store.set_version_thread(ver["id"], snap["thread_id"])
     return snap
 

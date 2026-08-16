@@ -76,6 +76,7 @@ export default function ProjectDetail() {
   }
 
   const versions = project?.versions ?? []
+  const versionById = new Map(versions.map(v => [v.id, v.name]))
 
   return (
     <div>
@@ -106,6 +107,7 @@ export default function ProjectDetail() {
                   <div className="text-xs text-slate-700 truncate">{v.requirement_text}</div>
                   <div className="text-[11px] text-slate-400 mt-0.5">
                     {v.thread_id ? `阶段：${stageNames[v.stage_index] ?? v.stage_index}` : '未启动流水线'}
+                    {v.baseline_version_id && ` · 基于 ${versionById.get(v.baseline_version_id) ?? '?'}`}
                     {v.note && ` · ${v.note}`}
                   </div>
                 </div>
@@ -130,6 +132,12 @@ export default function ProjectDetail() {
             <SheetDescription>客户新需求 = 在同一项目里新建版本，基于上一版本基线继续，不新建项目。</SheetDescription>
           </SheetHeader>
           <div className="mt-5 space-y-4">
+            {project?.current_version && (
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-xs text-indigo-700">
+                基线：<span className="font-mono font-semibold">{project.current_version.name}</span>
+                <span className="text-indigo-500">（新版本将在其基础上增量演进，不覆盖基线）</span>
+              </div>
+            )}
             <label className="block">
               <span className="text-xs text-slate-500 mb-1.5 block">版本号</span>
               <Input value={newName} onChange={e => setNewName(e.target.value)} className="font-mono" placeholder="如 v1.1.0" />
