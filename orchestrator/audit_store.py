@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 import uuid
@@ -52,6 +53,19 @@ def init_db() -> None:
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(audit_findings)").fetchall()]
         if "ref" not in cols:
             conn.execute("ALTER TABLE audit_findings ADD COLUMN ref TEXT")
+        # 审计留痕：append-only 变更日志（谁在何时增/改/删了哪条意见，保留 before/after）。
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS audit_log ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "finding_id TEXT, "
+            "version_id TEXT NOT NULL, "
+            "stage TEXT NOT NULL, "
+            "action TEXT NOT NULL, "
+            "before_json TEXT, "
+            "after_json TEXT, "
+            "ts INTEGER NOT NULL"
+            ")",
+        )
         conn.commit()
     finally:
         conn.close()
@@ -75,6 +89,18 @@ def list_findings(version_id: str, stage: str | None = None) -> list[dict]:
         conn.close()
 
 
+def _log(conn: sqlite3.Connection, finding_id: str | None, version_id: str, stage: str,
+         action: str, before: dict | None, after: dict | None) -> None:
+    conn.execute(
+        "INSERT INTO audit_log(finding_id, version_id, stage, action, before_json, after_json, ts) "
+        "VALUES(?,?,?,?,?,?,?)",
+        (finding_id, version_id, stage, action,
+         json.dumps(before, ensure_ascii=False) if before else None,
+         json.dumps(after, ensure_ascii=False) if after else None,
+         _now()),
+    )
+
+
 def create_finding(version_id: str, stage: str, path: str, line: int | None, ref: str | None,
                    severity: str, comment: str) -> dict:
     fid = "a" + uuid.uuid4().hex[:12]
@@ -86,6 +112,8 @@ def create_finding(version_id: str, stage: str, path: str, line: int | None, ref
             "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (fid, version_id, stage, path, line, ref, severity, comment, "open", now, now),
         )
+        after = dict(conn.execute("SELECT * FROM audit_findings WHERE id=?", (fid,)).fetchone())
+        _log(conn, fid, version_id, stage, "create", None, after)
         conn.commit()
     finally:
         conn.close()
@@ -106,12 +134,17 @@ def update_finding(fid: str, **fields: object) -> dict | None:
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not updates:
         return get_finding(fid)
+    before = get_finding(fid)
+    if before is None:
+        return None
     updates["updated_at"] = _now()
     cols = ", ".join(f"{k}=?" for k in updates)
     values = list(updates.values()) + [fid]
     conn = _conn()
     try:
         conn.execute(f"UPDATE audit_findings SET {cols} WHERE id=?", values)
+        after = dict(conn.execute("SELECT * FROM audit_findings WHERE id=?", (fid,)).fetchone())
+        _log(conn, fid, before["version_id"], before["stage"], "update", before, after)
         conn.commit()
     finally:
         conn.close()
@@ -119,10 +152,32 @@ def update_finding(fid: str, **fields: object) -> dict | None:
 
 
 def delete_finding(fid: str) -> bool:
+    before = get_finding(fid)
+    if before is None:
+        return False
     conn = _conn()
     try:
         cur = conn.execute("DELETE FROM audit_findings WHERE id=?", (fid,))
+        _log(conn, fid, before["version_id"], before["stage"], "delete", before, None)
         conn.commit()
         return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def list_log(version_id: str, limit: int = 200) -> list[dict]:
+    """某版本的审计意见变更日志（append-only 留痕），按时间倒序。"""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM audit_log WHERE version_id=? ORDER BY ts DESC LIMIT ?", (version_id, limit),
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["before"] = json.loads(d["before_json"]) if d.get("before_json") else None
+            d["after"] = json.loads(d["after_json"]) if d.get("after_json") else None
+            out.append(d)
+        return out
     finally:
         conn.close()

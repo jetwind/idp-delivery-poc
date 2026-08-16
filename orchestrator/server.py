@@ -322,6 +322,7 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
 async def _start_flow(
     requirement_text: str, cwd_raw: str,
     version_name: str | None = None, baseline: dict[str, Any] | None = None,
+    version_id: str | None = None,
 ) -> dict[str, Any]:
     thread_id = str(uuid.uuid4())
     cwd = _resolve_cwd(cwd_raw)
@@ -331,6 +332,7 @@ async def _start_flow(
         "stage_index": 0,
         "artifacts": {},
         "version_name": version_name,
+        "version_id": version_id,
         "baseline": baseline,
     }
     _flow_errors.pop(thread_id, None)
@@ -382,7 +384,7 @@ async def _start_version_flow(ver: dict) -> dict[str, Any]:
         }
     snap = await _start_flow(
         ver["requirement_text"], (proj or {}).get("cwd", ""),
-        version_name=ver["name"], baseline=baseline,
+        version_name=ver["name"], baseline=baseline, version_id=ver["id"],
     )
     project_store.set_version_thread(ver["id"], snap["thread_id"])
     return snap
@@ -636,6 +638,22 @@ async def audit_delete(vid: str, fid: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="审计意见不存在")
     audit_store.delete_finding(fid)
     return {"ok": True}
+
+
+@app.get("/versions/{vid}/gate-history")
+async def gate_history(vid: str) -> dict[str, Any]:
+    """某版本的 gate 审批历史（轮次 + 决策 + 反馈 + 本轮提交的审计意见 id）。"""
+    if project_store.get_version(vid) is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
+    return {"records": activity_store.list_gate_history(vid)}
+
+
+@app.get("/versions/{vid}/audit-log")
+async def audit_log(vid: str) -> dict[str, Any]:
+    """某版本的审计意见变更日志（append-only 留痕：增/改/删）。"""
+    if project_store.get_version(vid) is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
+    return {"logs": audit_store.list_log(vid)}
 
 
 # ---- AI 驾驶舱（全局汇总：所有项目/版本的流水线实时状态）----

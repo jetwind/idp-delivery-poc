@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { continueFlow, getAuditFindings, getFlowEvents, getFlowState, getVersion, resumeFlow, startVersionFlow, type AuditFinding, type FlowEvent, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt, type TodoItem, type Version } from '@/api/flow'
+import { continueFlow, getAuditFindings, getGateHistory, getFlowEvents, getFlowState, getVersion, resumeFlow, startVersionFlow, type AuditFinding, type FlowEvent, type FlowQuestion, type FlowSnapshot, type GateRecord, type QuestionInterrupt, type TodoItem, type Version } from '@/api/flow'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -34,6 +34,7 @@ export default function FlowPage() {
   const [running, setRunning] = useState(false)
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const [auditTrail, setAuditTrail] = useState<AuditFinding[]>([])
+  const [gateHistory, setGateHistory] = useState<GateRecord[]>([])
   const [trailOpen, setTrailOpen] = useState(false)
   const [reviewFile, setReviewFile] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -60,11 +61,13 @@ export default function FlowPage() {
     return () => { alive = false }
   }, [vid])
 
-  // 版本审计留痕：加载该版本全部阶段的审计意见（跨阶段回看）。
+  // 版本审计留痕：加载该版本全部阶段的审计意见 + gate 审批历史。
   async function reloadTrail() {
     if (!vid) return
     try {
-      setAuditTrail((await getAuditFindings(vid)).findings)
+      const [f, g] = await Promise.all([getAuditFindings(vid), getGateHistory(vid)])
+      setAuditTrail(f.findings)
+      setGateHistory(g.records)
     } catch { /* 忽略 */ }
   }
   useEffect(() => {
@@ -177,7 +180,7 @@ export default function FlowPage() {
         answer = {
           action: 'revise',
           feedback: gateFeedback.trim(),
-          findings: findings.map(f => ({ path: f.path, line: f.line, ref: f.ref, severity: f.severity, comment: f.comment })),
+          findings: findings.map(f => ({ id: f.id, path: f.path, line: f.line, ref: f.ref, severity: f.severity, comment: f.comment })),
         }
       }
       await resumeFlow(threadId!, answer)
@@ -507,18 +510,45 @@ export default function FlowPage() {
         </div>
       )}
 
-      {/* 版本审计留痕（跨阶段回看） */}
-      {vid && auditTrail.length > 0 && (
+      {/* 版本审计留痕（审批时间线 + 意见，跨阶段回看） */}
+      {vid && (auditTrail.length > 0 || gateHistory.length > 0) && (
         <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
           <button onClick={() => setTrailOpen(o => !o)}
             className="w-full flex items-center gap-2 px-5 py-3 border-b border-slate-100 text-left">
             <History className="w-4 h-4 text-indigo-500" />
             <span className="text-[13px] font-semibold text-slate-800">版本审计留痕</span>
-            <span className="text-xs text-slate-400">{auditTrail.length} 条意见 · {auditTrail.filter(f => f.status === 'open').length} 条未处理</span>
+            <span className="text-xs text-slate-400">{auditTrail.length} 条意见 · {auditTrail.filter(f => f.status === 'open').length} 条未处理 · {gateHistory.length} 次审批</span>
             <ChevronDown className={cn('ml-auto w-4 h-4 text-slate-400 transition-transform', trailOpen && 'rotate-180')} />
           </button>
           {trailOpen && (
             <div className="px-5 py-3 space-y-2 max-h-[360px] overflow-y-auto">
+              {gateHistory.length > 0 && (
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-500 mb-1">审批时间线</div>
+                  <div className="space-y-1">
+                    {gateHistory.map(g => (
+                      <div key={g.id} className={cn('flex items-start gap-2 rounded border px-3 py-1.5 text-xs',
+                        g.outcome === 'approve' ? 'border-emerald-100 bg-emerald-50/40' : 'border-rose-100 bg-rose-50/40')}>
+                        {g.outcome === 'approve'
+                          ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                          : <XCircle className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-medium text-slate-700">{g.agent}</span>
+                            <span className={cn('px-1 rounded text-[10px]', g.outcome === 'approve' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700')}>
+                              {g.outcome === 'approve' ? '通过' : '退回'}
+                            </span>
+                            {g.round_no != null && <span className="text-[10px] text-slate-400">第 {g.round_no} 轮</span>}
+                            {g.finding_ids.length > 0 && <span className="text-[10px] text-amber-600">随本轮提交 {g.finding_ids.length} 条意见</span>}
+                            <span className="text-[10px] text-slate-400">{new Date(g.ts).toLocaleString()}</span>
+                          </div>
+                          {g.outcome === 'revise' && g.detail && <div className="mt-0.5 text-slate-600">{g.detail}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {[...new Set(auditTrail.map(f => f.stage))].map(sid => {
                 const items = auditTrail.filter(f => f.stage === sid)
                 return (

@@ -49,6 +49,7 @@ class FlowState(TypedDict, total=False):
     gate_round: int
     # 版本增量交付：当前版本名 + 基线版本信息（v1.1 基于 v1.0 继续叠加）。
     version_name: str | None
+    version_id: str | None
     baseline: dict[str, Any] | None
     # 阶段执行诊断：agent 回合报错（透出给前端）+ 本阶段会话开始时间（校验产物新鲜度）。
     stage_error: str | None
@@ -616,9 +617,15 @@ async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
         action = "approve"
 
     round_no = state.get("gate_round", 0) + 1
+    finding_ids = [f.get("id") for f in findings if isinstance(f, dict) and f.get("id")]
+    version_id = state.get("version_id")
+    stage_id = stage["id"]
 
     if action == "approve":
-        activity_store.record_gate(state.get("current_session_id") or "", stage["name"], "approve", "", round_no)
+        activity_store.record_gate(
+            state.get("current_session_id") or "", stage["name"], "approve", "", round_no,
+            version_id=version_id, stage=stage_id, finding_ids=finding_ids,
+        )
         return {
             **state,
             "stage_index": state["stage_index"] + 1,
@@ -642,7 +649,10 @@ async def gate_node(state: FlowState, client: HarnessClient) -> FlowState:
     state["validation_status"] = "pending"
     state["validation_attempts"] = 0
     state["validation_error"] = None
-    activity_store.record_gate(state.get("current_session_id") or "", stage["name"], "revise", feedback, round_no)
+    activity_store.record_gate(
+        state.get("current_session_id") or "", stage["name"], "revise", feedback, round_no,
+        version_id=version_id, stage=stage_id, finding_ids=finding_ids,
+    )
     if state.get("current_session_id"):
         out_json = schema_store.STAGE_OUTPUT_JSON.get(stage["id"], "")
         md_files = "、".join(stage.get("output_files", []))

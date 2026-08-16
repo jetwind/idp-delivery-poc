@@ -585,3 +585,40 @@ export function deleteAuditFinding(versionId: string, findingId: string): Promis
 export function getFileDiff(versionId: string, path: string): Promise<FileDiff> {
   return flowJson(`/versions/${encodeURIComponent(versionId)}/diff?path=${encodeURIComponent(path)}`)
 }
+
+/** 一次 gate 审批记录（版本审计链的一环）。 */
+export interface GateRecord {
+  id: number
+  session_id: string
+  agent: string
+  ts: number
+  kind: string
+  detail: string
+  outcome: 'approve' | 'revise'
+  version_id: string | null
+  stage: string | null
+  round_no: number | null
+  finding_ids: string[]
+}
+
+/** 某版本的 gate 审批历史（轮次 + 决策 + 反馈 + 本轮提交意见）。 */
+export function getGateHistory(versionId: string): Promise<{ records: GateRecord[] }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/gate-history`)
+}
+
+/** 审计意见变更日志（append-only 留痕）。 */
+export interface AuditLogEntry {
+  id: number
+  finding_id: string | null
+  version_id: string
+  stage: string
+  action: 'create' | 'update' | 'delete'
+  before: AuditFinding | null
+  after: AuditFinding | null
+  ts: number
+}
+
+/** 某版本的审计意见变更日志。 */
+export function getAuditLog(versionId: string): Promise<{ logs: AuditLogEntry[] }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit-log`)
+}
