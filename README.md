@@ -34,6 +34,8 @@ React 前端 (3000)  →  LangGraph 编排 (3087)  →  harness 执行层 (3086)
 
 ## 3. 快速启动
 
+> 📖 **第一次本地启动，直接照 [STARTUP.md](STARTUP.md) 一步一步走**（含克隆仓库、装依赖、配密钥、起三服务、验证）。下面是精简版。
+
 ### 3.1 准备 harness（一次性）
 
 把阶段 preset 复制到 dsh 用户预设根，harness 本身零改动：
