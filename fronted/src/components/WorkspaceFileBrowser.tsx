@@ -5,7 +5,7 @@ import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github.css'
 import {
   ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode, FileJson, Loader2,
-  Eye, Code2, GitCompareArrows, Trash2, CheckCheck, MessageSquare, AlertTriangle,
+  Eye, Code2, GitCompareArrows, Trash2, CheckCheck, MessageSquare, AlertTriangle, Pencil,
 } from 'lucide-react'
 import {
   getFlowFiles, getFlowFile, getAuditFindings, createAuditFinding, deleteAuditFinding, updateAuditFinding, getFileDiff, getStagesSchema,
@@ -275,6 +275,10 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
   const [newComment, setNewComment] = useState('')
   const [newSeverity, setNewSeverity] = useState<'blocking' | 'suggestion'>('suggestion')
   const [findingsBusy, setFindingsBusy] = useState(false)
+  // 二次编辑已有意见
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editComment, setEditComment] = useState('')
+  const [editSeverity, setEditSeverity] = useState<'blocking' | 'suggestion'>('suggestion')
 
   useEffect(() => {
     getStagesSchema().then(r => {
@@ -411,6 +415,24 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
     }
   }
 
+  function startEdit(f: AuditFinding) {
+    setEditingId(f.id); setEditComment(f.comment); setEditSeverity(f.severity)
+  }
+
+  async function saveEdit() {
+    if (!editingId || !editComment.trim()) return
+    setFindingsBusy(true)
+    try {
+      await updateAuditFinding(versionId, editingId, { severity: editSeverity, comment: editComment.trim() })
+      await reloadFindings()
+      setEditingId(null); setEditComment('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setFindingsBusy(false)
+    }
+  }
+
   // 就地渲染标注弹框：activeKey 命中当前标注的 ref/line 时，在元素正下方渲染。
   function renderForm(activeKey: string): React.ReactNode {
     if (!annotate || !stage) return null
@@ -518,29 +540,48 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
           </div>
           <div className="space-y-1.5">
             {findings.map(f => (
-              <div key={f.id} className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs',
-                f.status === 'resolved' ? 'border-slate-100 opacity-60' : 'border-amber-100 bg-amber-50/40')}>
-                {f.severity === 'blocking'
-                  ? <AlertTriangle className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
-                  : <MessageSquare className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <div className="font-mono text-slate-600">{f.path}{f.ref ? ` · ${f.ref}` : f.line ? ` : ${f.line}` : ''}
-                    <span className={cn('ml-2 px-1 rounded', f.severity === 'blocking' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700')}>
-                      {f.severity === 'blocking' ? '阻断' : '建议'}
-                    </span>
+              <div key={f.id}>
+                {editingId === f.id ? (
+                  <InlineAnnotationForm
+                    label={`编辑意见：${f.ref ?? (f.line ? `第 ${f.line} 行` : f.path)}`}
+                    severity={editSeverity}
+                    onSeverity={setEditSeverity}
+                    comment={editComment}
+                    onComment={setEditComment}
+                    busy={findingsBusy}
+                    onSubmit={saveEdit}
+                    onCancel={() => setEditingId(null)}
+                  />
+                ) : (
+                  <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs',
+                    f.status === 'resolved' ? 'border-slate-100 opacity-60' : 'border-amber-100 bg-amber-50/40')}>
+                    {f.severity === 'blocking'
+                      ? <AlertTriangle className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
+                      : <MessageSquare className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono text-slate-600">{f.path}{f.ref ? ` · ${f.ref}` : f.line ? ` : ${f.line}` : ''}
+                        <span className={cn('ml-2 px-1 rounded', f.severity === 'blocking' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700')}>
+                          {f.severity === 'blocking' ? '阻断' : '建议'}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-slate-700">{f.comment}</div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => startEdit(f)} title="编辑意见"
+                        className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-indigo-600">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => toggleResolve(f)} title={f.status === 'open' ? '标记已处理' : '重新打开'}
+                        className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-emerald-600">
+                        <CheckCheck className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => removeFinding(f)} title="删除"
+                        className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-rose-500">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-slate-700">{f.comment}</div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => toggleResolve(f)} title={f.status === 'open' ? '标记已处理' : '重新打开'}
-                    className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-emerald-600">
-                    <CheckCheck className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => removeFinding(f)} title="删除"
-                    className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-rose-500">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                )}
               </div>
             ))}
           </div>

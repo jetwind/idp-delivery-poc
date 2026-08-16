@@ -61,13 +61,14 @@ export default function FlowPage() {
   }, [vid])
 
   // 版本审计留痕：加载该版本全部阶段的审计意见（跨阶段回看）。
-  useEffect(() => {
+  async function reloadTrail() {
     if (!vid) return
-    let alive = true
-    getAuditFindings(vid).then(r => {
-      if (alive) setAuditTrail(r.findings)
-    }).catch(() => { /* 忽略 */ })
-    return () => { alive = false }
+    try {
+      setAuditTrail((await getAuditFindings(vid)).findings)
+    } catch { /* 忽略 */ }
+  }
+  useEffect(() => {
+    void reloadTrail()
   }, [vid, snapshot?.stage_index])
 
   // 启动后轮询：状态单独拉（快，pending 立即生效）；日志单独异步更新（慢也不阻塞状态）。
@@ -208,6 +209,7 @@ export default function FlowPage() {
   const selectedOutputs = selectedStage && snapshot?.artifacts ? (snapshot.artifacts[selectedStage] ?? []) : []
   const gateStageId = snapshot ? STAGES[snapshot.stage_index]?.id : undefined
   const gateOutputs = gateStageId && snapshot?.artifacts ? (snapshot.artifacts[gateStageId] ?? []) : []
+  const gateFindings = gateStageId ? auditTrail.filter(f => f.stage === gateStageId && f.status === 'open') : []
 
   return (
     <div>
@@ -418,6 +420,25 @@ export default function FlowPage() {
                   </div>
                 </div>
               )}
+              {gateFindings.length > 0 && (
+                <div className="mb-3 rounded-lg border border-amber-100 bg-amber-50/50 p-2.5">
+                  <div className="text-[11px] text-amber-700 mb-1.5 flex items-center gap-1">
+                    <MessageSquare className="w-3.5 h-3.5" />已记录 {gateFindings.length} 条审计意见（提交「补充矫正」时将一并带给 agent）
+                  </div>
+                  <div className="space-y-1">
+                    {gateFindings.map(f => (
+                      <div key={f.id} className="text-xs flex items-start gap-1.5">
+                        <span className={cn('shrink-0 px-1 rounded text-[10px]', f.severity === 'blocking' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700')}>
+                          {f.severity === 'blocking' ? '阻断' : '建议'}
+                        </span>
+                        <span className="text-slate-600 min-w-0">
+                          <span className="font-mono">{f.ref ?? (f.line ? `第 ${f.line} 行` : f.path)}</span> {f.comment}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <p className="text-xs text-slate-500 mb-3">确认通过进入下一阶段；不通过时填写补充矫正意见（必填），agent 据此在当前版本上增量修订后再次提交。</p>
               <Textarea
                 rows={3}
@@ -565,7 +586,7 @@ export default function FlowPage() {
       {/* 产物预览 + 审计对话框（gate 处点击产物文件弹出） */}
       <ArtifactReviewDialog
         open={!!reviewFile}
-        onClose={() => setReviewFile(null)}
+        onClose={() => { setReviewFile(null); void reloadTrail() }}
         threadId={threadId ?? ''}
         versionId={vid ?? ''}
         stage={gateStageId ?? ''}

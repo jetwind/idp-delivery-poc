@@ -102,7 +102,7 @@ export default function ArtifactReviewDialog({ open, onClose, threadId, versionI
 
   return (
     <Sheet open={open} onOpenChange={o => { if (!o) onClose() }}>
-      <SheetContent className="w-[720px] sm:max-w-[720px] overflow-y-auto">
+      <SheetContent className="w-[94vw] max-w-[1200px] sm:max-w-[1200px] overflow-y-auto">
         <SheetHeader>
           <SheetTitle className="font-mono text-sm">{path ?? ''}</SheetTitle>
           <SheetDescription>预览并标注审计意见（JSON 产物为结构化模板）</SheetDescription>
