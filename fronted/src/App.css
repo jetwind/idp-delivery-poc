@@ -39,3 +39,33 @@ main > div {
     transform: translateY(0);
   }
 }
+
+/* 工作区 markdown 预览（react-markdown 输出） */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 1.1em 0 0.5em;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.35;
+}
+.markdown-body h1 { font-size: 1.25em; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3em; }
+.markdown-body h2 { font-size: 1.15em; }
+.markdown-body h3 { font-size: 1.05em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body p { margin: 0.5em 0; }
+.markdown-body ul,
+.markdown-body ol { margin: 0.5em 0; padding-left: 1.4em; }
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body li { margin: 0.2em 0; }
+.markdown-body table { border-collapse: collapse; margin: 0.8em 0; width: 100%; font-size: 0.85em; }
+.markdown-body th,
+.markdown-body td { border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; }
+.markdown-body th { background: #f8fafc; font-weight: 600; color: #334155; }
+.markdown-body blockquote { margin: 0.6em 0; padding: 0.2em 0.9em; border-left: 3px solid #cbd5e1; color: #64748b; }
+.markdown-body hr { border: none; border-top: 1px solid #e2e8f0; margin: 1em 0; }
+.markdown-body code { font-size: 0.9em; }
+.markdown-body a { color: #4f46e5; text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
