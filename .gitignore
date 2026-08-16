@@ -14,9 +14,35 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# git URL clone 出来的交付项目（编排层 _resolve_cwd 生成）
+projects/
+
+# examples/ 下的交付 demo 与运行时产物均不入库，只提交平台代码
+examples/
+
 # 编辑器 / 系统
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 *.local
+
+#
+*.docx
+
+# 标准集中存储数据库（运行时数据，种子在 standards/*.md）
+standards.db
+
+# 图 checkpoint 持久化数据库（重启后流程状态，运行时数据）
+checkpoints.db
+checkpoints.db-wal
+checkpoints.db-shm
+
+# 版本交付产物快照（基线 diff 用，运行时数据）
+snapshots/

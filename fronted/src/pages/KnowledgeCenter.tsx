@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router'
 import { kbCategories, kbEntries, kbReviews, kbUsage, kbAgents, kbGovernance, type KBEntry } from '@/mock/data6'
 import { PageHeader, Pill, Bar, statusTone, T, thCls, tdCls } from '@/components/common'
 import { Button } from '@/components/ui/button'
@@ -11,13 +12,14 @@ import { cn } from '@/lib/utils'
 import KBCreate from '@/components/KBCreate'
 import {
   BookOpen, LayoutGrid, List, Inbox, Share2, Search, Plus, Bot, ShieldCheck,
-  CheckCircle2, XCircle, AlertTriangle, GitBranch, Link2, History, Sparkles, User,
+  CheckCircle2, XCircle, AlertTriangle, GitBranch, Link2, History, Sparkles, User, FileStack, ArrowRight,
 } from 'lucide-react'
 
 const catTone: Record<string, string> = { 产品知识库: 'bg-blue-50 text-blue-600', 行业知识: 'bg-cyan-50 text-cyan-600', 技术规范: 'bg-violet-50 text-violet-600', 最佳实践: 'bg-emerald-50 text-emerald-600', 项目沉淀资产: 'bg-amber-50 text-amber-600' }
 const reviewTone: Record<string, any> = { 待审批: 'amber', 已通过: 'green', 已驳回: 'red' }
 
 export default function KnowledgeCenter() {
+  const nav = useNavigate()
   const [entry, setEntry] = useState<KBEntry | null>(null)
   const [cat, setCat] = useState('all')
   const [status, setStatus] = useState('all')
@@ -35,7 +37,14 @@ export default function KnowledgeCenter() {
       <PageHeader
         title="知识库管理"
         desc="企业知识的沉淀、审核、发布与消费 · 数字员工执行任务时的知识来源"
-        extra={<Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setCreateOpen(true)}><Plus className="w-4 h-4 mr-1" />新建知识</Button>}
+        extra={
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => nav('/knowledge/standards')}>
+              <FileStack className="w-4 h-4 mr-1" />工程标准
+            </Button>
+            <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setCreateOpen(true)}><Plus className="w-4 h-4 mr-1" />新建知识</Button>
+          </div>
+        }
       />
 
       <div className="bg-white rounded-lg border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-5 pb-5">
@@ -67,6 +76,18 @@ export default function KnowledgeCenter() {
               ))}
             </div>
             <div className="grid grid-cols-3 gap-3">
+              {/* 工程标准（真实接入）：阶段标准文档 + 产物 Schema */}
+              <div className="rounded-lg border border-violet-300/70 bg-gradient-to-br from-violet-50 to-indigo-50 p-4 hover:shadow-md transition-shadow cursor-pointer" onClick={() => nav('/knowledge/standards')}>
+                <div className="flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-violet-100 px-2 py-1 text-xs font-medium text-violet-700"><FileStack className="w-3.5 h-3.5" />工程标准</span>
+                  <Pill tone="green" dot>已接入</Pill>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-600">各交付阶段的标准文档（需求/设计/任务/编码/测试）+ 产物 Schema，经 MCP 供数字员工检索，图侧做确定性校验。</p>
+                <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>5 个阶段 · 标准文档 + 产物 Schema</span>
+                  <span className="text-indigo-600 font-medium inline-flex items-center gap-0.5">管理 <ArrowRight className="w-3 h-3" /></span>
+                </div>
+              </div>
               {kbCategories.map(c => (
                 <div key={c.id} className="rounded-lg border border-slate-200/80 p-4 hover:shadow-md transition-shadow">
                   <div className="flex items-center justify-between">

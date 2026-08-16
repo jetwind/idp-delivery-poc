@@ -1,0 +1,634 @@
+/**
+ * LangGraph 编排服务（orchestrator/，FastAPI 3087）的 transport 层。
+ *
+ * 前端直连编排服务（带 CORS）。流水线是「启动 → 轮询 state + events → 处理
+ * pending interrupt（question 回答 / gate 决策 / approval）→ resume」的循环。
+ * start/resume 已异步化（立即返回），图在后台跑。
+ */
+
+/** question interrupt 里的单个问题。 */
+export interface FlowQuestion {
+  id: string
+  question: string
+  options?: { label: string }[]
+  multiSelect?: boolean
+  detail?: string
+}
+
+export interface QuestionInterrupt {
+  type: 'question'
+  stage: string
+  session_id: string
+  rpc_id: string
+  questions: FlowQuestion[]
+}
+
+export interface GateInterrupt {
+  type: 'gate'
+  stage: string
+  spec_id: string | null
+}
+
+export interface ApprovalInterrupt {
+  type: 'approval'
+  stage: string
+  session_id: string
+  rpc_id: string
+  toolName: string
+  reason?: string
+}
+
+export type FlowPending = QuestionInterrupt | GateInterrupt | ApprovalInterrupt
+
+export interface FlowSnapshot {
+  thread_id: string
+  stage_index: number
+  stage: string
+  done: boolean
+  pending: FlowPending | null
+  /** 每阶段产出的文件清单（阶段 id → 文件路径列表）。 */
+  artifacts: Record<string, string[]>
+  /** 当前阶段 agent 会话 id（用于拉取实时日志）。 */
+  current_session_id: string | null
+  /** 已解析的工作目录（本地绝对路径）。 */
+  cwd: string | null
+  /** 后台图运行错误（有则显示）。 */
+  error: string | null
+  /** 后台图执行任务是否还在跑（false = 可能因编排层重启而孤儿化）。 */
+  flow_running: boolean
+  /** 当前阶段 agent 回合报错（如缺依赖/模型失败），有则显示。 */
+  stage_error?: string | null
+  /** 阶段产物 schema 校验状态（结构化产物子步骤）。 */
+  validation: {
+    status: 'pending' | 'passed' | 'retrying' | 'failed'
+    attempts: number
+    error: string | null
+  }
+}
+
+/** 一条实时活动日志（由编排层从 session.history 摘要而来）。 */
+export interface FlowEvent {
+  seq: number
+  type: 'user' | 'assistant' | 'tool' | 'tool_result'
+  session_id?: string
+  stage?: string
+  text?: string
+  toolName?: string
+  input?: string
+  ok?: boolean
+  source?: string | null
+}
+
+/** agent 的 todo_write 子步骤（执行中/待办/已完成）。 */
+export interface TodoItem {
+  content: string
+  status: 'in_progress' | 'pending' | 'completed'
+}
+
+export interface FlowEvents {
+  thread_id: string
+  session_id: string | null
+  running: boolean
+  stage: string
+  events: FlowEvent[]
+  todos: TodoItem[]
+}
+
+/** 工作区里的一个文件（相对 cwd 的路径）。 */
+export interface FlowFile {
+  path: string
+  size: number
+}
+
+export interface FlowFiles {
+  thread_id: string
+  cwd: string | null
+  files: FlowFile[]
+}
+
+export interface FlowFileContent {
+  path: string
+  content: string
+  truncated: boolean
+}
+
+// 编排服务直连（带 CORS）。/flow/start、/flow/resume 已异步化（立即返回），
+// 前端轮询 /flow/state（阶段/待处理项）与 /flow/events（实时日志）。
+// 注意用 127.0.0.1 而非 localhost：uvicorn 只监听 IPv4，localhost 会先解析到
+// IPv6 ::1 再回退，每个请求多 3-5s，轮询堆积会把 resume 卡住。
+const FLOW_BASE = 'http://127.0.0.1:3087'
+
+async function flowJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${FLOW_BASE}${path}`, {
+    headers: { 'content-type': 'application/json' },
+    signal: AbortSignal.timeout(30000),
+    ...init,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let detail = text
+    try {
+      const parsed = JSON.parse(text)
+      if (typeof parsed.detail === 'string') detail = parsed.detail
+      else if (Array.isArray(parsed.detail)) detail = parsed.detail.map((d: any) => d.msg ?? JSON.stringify(d)).join('; ')
+    } catch { /* 非 JSON 时用原文 */ }
+    throw new Error(`编排服务失败（${path}）：HTTP ${res.status}${detail ? ` ${detail}` : ''}`)
+  }
+  return res.json() as Promise<T>
+}
+
+/** 启动流水线：输入需求文本 + 工作目录，返回首个快照。 */
+export function startFlow(requirementText: string, cwd: string): Promise<FlowSnapshot> {
+  return flowJson('/flow/start', {
+    method: 'POST',
+    body: JSON.stringify({ requirement_text: requirementText, cwd }),
+  })
+}
+
+/** 读当前阶段 + 待处理的 interrupt。 */
+export function getFlowState(threadId: string): Promise<FlowSnapshot> {
+  return flowJson(`/flow/state/${threadId}`)
+}
+
+/** 读当前阶段 session 的最近事件流（实时日志）。 */
+export function getFlowEvents(threadId: string): Promise<FlowEvents> {
+  return flowJson(`/flow/events/${threadId}`)
+}
+
+/** 列举工作目录下的文件清单。 */
+export function getFlowFiles(threadId: string): Promise<FlowFiles> {
+  return flowJson(`/flow/files/${threadId}`)
+}
+
+/** 读取工作目录下某个文件的内容。 */
+export function getFlowFile(threadId: string, path: string): Promise<FlowFileContent> {
+  return flowJson(`/flow/file/${threadId}?path=${encodeURIComponent(path)}`)
+}
+
+/**
+ * resume：回答 question（[{id, selected, custom?}]）、给出 gate 决策（"approve"/"reject"）
+ * 或 approval 决策（"allowed-once"/"rejected"）。异步推进到下一个 interrupt（立即返回）。
+ */
+export function resumeFlow(threadId: string, answer: unknown): Promise<FlowSnapshot> {
+  return flowJson(`/flow/resume/${threadId}`, {
+    method: 'POST',
+    body: JSON.stringify({ answer }),
+  })
+}
+
+/** 继续一个因编排层重启而卡在非 interrupt 的流程（从上次 checkpoint 推进）。 */
+export function continueFlow(threadId: string): Promise<FlowSnapshot> {
+  return flowJson(`/flow/continue/${threadId}`, { method: 'POST' })
+}
+
+/** 阶段列表（用于渲染阶段条）。 */
+export function getStages(): Promise<{ id: string; name: string }[]> {
+  return flowJson('/flow/stages')
+}
+
+// ---- standards 管理（阶段标准文件 CRUD，后台 UI 维护，经 MCP 给 harness）----
+
+export interface StandardsStage {
+  stage: string
+  name: string
+  files: string[]
+}
+
+export interface StandardsTree {
+  stages: StandardsStage[]
+}
+
+export interface StandardFile {
+  stage: string
+  name: string
+  content: string
+}
+
+/** 各阶段标准文件清单。 */
+export function getStandardsTree(): Promise<StandardsTree> {
+  return flowJson('/standards/tree')
+}
+
+/** 读某标准文件内容。 */
+export function readStandard(stage: string, name: string): Promise<StandardFile> {
+  return flowJson(`/standards/file?stage=${encodeURIComponent(stage)}&name=${encodeURIComponent(name)}`)
+}
+
+/** 写/更新某标准文件内容。 */
+export function writeStandard(stage: string, name: string, content: string): Promise<{ ok: boolean }> {
+  return flowJson(`/standards/file?stage=${encodeURIComponent(stage)}&name=${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  })
+}
+
+/** 删除某标准文件。 */
+export function deleteStandard(stage: string, name: string): Promise<{ ok: boolean }> {
+  return flowJson(`/standards/file?stage=${encodeURIComponent(stage)}&name=${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
+}
+
+// ---- 数字员工（阶段 agent）+ 成本统计 ----
+
+export interface DigitalAgent {
+  id: string
+  name: string
+  preset: string
+  role: string
+  desc: string
+  knowledge: string[]
+}
+
+export interface AgentCost {
+  id: string
+  name: string
+  sessions: number
+  inputTokens: number
+  outputTokens: number
+  cost: number
+}
+
+export interface AgentsCost {
+  agents: AgentCost[]
+  totalCost: number
+  totalTokens: number
+}
+
+/** 数字员工列表（5 个阶段 agent）。 */
+export function getAgents(): Promise<{ agents: DigitalAgent[] }> {
+  return flowJson('/agents')
+}
+
+/** 数字员工成本统计（按 preset 聚合 token 用量与成本）。 */
+export function getAgentsCost(): Promise<AgentsCost> {
+  return flowJson('/agents/cost')
+}
+
+/** 运行监控：最近的 session 活动摘要。 */
+export interface AgentActivity {
+  sessionId: string
+  agent: string
+  agentName: string
+  title: string
+  tokens: number
+  cost: number
+  running: boolean
+  updatedAt: number
+}
+
+/** 审计记录（审批事件）。 */
+export interface AuditRecord {
+  id: number
+  session_id: string
+  agent: string
+  ts: number
+  kind: string
+  detail: string
+  outcome: string
+}
+
+export function getAgentsActivity(limit = 50): Promise<{ activities: AgentActivity[] }> {
+  return flowJson(`/agents/activity?limit=${limit}`)
+}
+
+export function getAgentsAudit(limit = 100): Promise<{ audits: AuditRecord[] }> {
+  return flowJson(`/agents/audit?limit=${limit}`)
+}
+
+// ---- 数字员工模型配置 ----
+
+export interface ModelOption {
+  provider: string
+  model: string
+  name: string
+  efforts: string[]
+  defaultEffort?: string
+}
+
+export interface AgentModelConfig {
+  provider: string
+  model: string
+  reasoningEffort: string
+  permission?: string | null
+  maxRetries?: number | null
+  knowledgeStages?: string[] | null
+}
+
+export interface AgentConfigRow {
+  id: string
+  name: string
+  config: AgentModelConfig | null
+  /** 该员工可访问的知识库「类」（阶段 id 列表）。 */
+  knowledgeStages: string[]
+}
+
+/** 可用模型目录（flash/pro + 思考深度）。 */
+export function getAgentModels(): Promise<{ models: ModelOption[] }> {
+  return flowJson('/agents/models')
+}
+
+/** 每个数字员工当前的模型配置。 */
+export async function getAgentConfigs(): Promise<{ configs: AgentConfigRow[] }> {
+  const r = await flowJson<{ configs: any[] }>('/agents/config')
+  return {
+    configs: r.configs.map(c => ({
+      id: c.id,
+      name: c.name,
+      config: c.config
+        ? {
+            provider: c.config.provider,
+            model: c.config.model,
+            reasoningEffort: c.config.reasoningEffort,
+            permission: c.config.permission ?? null,
+            maxRetries: c.config.maxRetries ?? null,
+          }
+        : null,
+      knowledgeStages: c.knowledgeStages ?? [],
+    })),
+  }
+}
+
+/** 设置某数字员工的模型配置。 */
+export function setAgentConfig(stage: string, cfg: AgentModelConfig): Promise<{ ok: boolean }> {
+  return flowJson(`/agents/config?stage=${encodeURIComponent(stage)}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      provider: cfg.provider,
+      model: cfg.model,
+      reasoningEffort: cfg.reasoningEffort,
+      permission: cfg.permission ?? null,
+      maxRetries: cfg.maxRetries ?? null,
+      knowledgeStages: cfg.knowledgeStages ?? null,
+    }),
+  })
+}
+
+// ---- 阶段产物 JSON Schema 配置（结构化产物约定，图侧校验）----
+
+export interface StageSchemaInfo {
+  stage: string
+  title: string
+  required: string[]
+  schema: Record<string, unknown>
+}
+
+/** 所有阶段的产物 schema。 */
+export function getStagesSchema(): Promise<{ schemas: StageSchemaInfo[] }> {
+  return flowJson('/stages/schema')
+}
+
+/** 读某阶段的产物 schema。 */
+export function getStageSchema(stage: string): Promise<{ stage: string; schema: Record<string, unknown> }> {
+  return flowJson(`/stages/schema/${encodeURIComponent(stage)}`)
+}
+
+/** 设置某阶段的产物 schema。 */
+export function setStageSchema(stage: string, schema: Record<string, unknown>): Promise<{ ok: boolean }> {
+  return flowJson(`/stages/schema/${encodeURIComponent(stage)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ schema }),
+  })
+}
+
+// ---- 交付项目管理（项目 → 版本 → 流水线）----
+
+export interface Version {
+  id: string
+  project_id: string
+  name: string
+  requirement_text: string
+  thread_id: string | null
+  stage_index: number
+  status: '进行中' | '已交付' | '已归档'
+  git_ref: string | null
+  note: string
+  /** 基线版本 id（v1.1 基于 v1.0；首个版本为 null）。 */
+  baseline_version_id: string | null
+  created_at: number
+  updated_at: number
+}
+
+export interface Project {
+  id: string
+  name: string
+  cwd: string
+  created_at: number
+  updated_at: number
+  /** 当前版本（最近创建的版本）。 */
+  current_version: Version | null
+  /** 详情接口才返回的版本列表。 */
+  versions?: Version[]
+}
+
+/** 项目列表。 */
+export function getProjects(): Promise<{ projects: Project[] }> {
+  return flowJson('/projects')
+}
+
+/** 单个项目详情（含版本列表）。 */
+export function getProject(id: string): Promise<{ project: Project }> {
+  return flowJson(`/projects/${encodeURIComponent(id)}`)
+}
+
+/** 新建项目（名称 + 原始需求 + 工作目录），自动创建首个版本 v1.0.0。 */
+export function createProject(name: string, requirementText: string, cwd: string): Promise<{ project: Project }> {
+  return flowJson('/projects', {
+    method: 'POST',
+    body: JSON.stringify({ name, requirement_text: requirementText, cwd }),
+  })
+}
+
+/** 删除项目（含其所有版本）。 */
+export function deleteProject(id: string): Promise<{ ok: boolean }> {
+  return flowJson(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** 建议下一个版本号。 */
+export function suggestVersionName(projectId: string): Promise<{ name: string }> {
+  return flowJson(`/projects/${encodeURIComponent(projectId)}/versions/suggest`)
+}
+
+/** 基于当前基线新建一个版本。 */
+export function createVersion(projectId: string, name: string, requirementText: string, note: string): Promise<{ version: Version }> {
+  return flowJson(`/projects/${encodeURIComponent(projectId)}/versions`, {
+    method: 'POST',
+    body: JSON.stringify({ name, requirement_text: requirementText, note }),
+  })
+}
+
+/** 读某版本详情。 */
+export function getVersion(id: string): Promise<{ version: Version }> {
+  return flowJson(`/versions/${encodeURIComponent(id)}`)
+}
+
+/** 启动/重新开始某版本的流水线，返回首个快照。 */
+export function startVersionFlow(id: string): Promise<FlowSnapshot> {
+  return flowJson(`/versions/${encodeURIComponent(id)}/flow`, { method: 'POST' })
+}
+
+/** 标记版本已交付（并尽力打 git tag）。 */
+export function deliverVersion(id: string): Promise<{ ok: boolean }> {
+  return flowJson(`/versions/${encodeURIComponent(id)}/deliver`, { method: 'POST' })
+}
+
+/** 启动/重新开始该项目【当前版本】的流水线。 */
+export function startProjectFlow(id: string): Promise<FlowSnapshot> {
+  return flowJson(`/projects/${encodeURIComponent(id)}/flow`, { method: 'POST' })
+}
+
+// ---- AI 驾驶舱（全局汇总）----
+
+export interface CockpitItem {
+  version_id: string
+  version_name: string
+  project_id: string
+  project_name: string
+  status: string
+  stage_index: number
+  /** 当前阶段名（如「04 编码」），仅已启动的版本有。 */
+  stage?: string
+  thread_id: string | null
+  note: string
+  /** 等待人工时：gate / question / approval。 */
+  pending_type?: string | null
+  pending_label?: string
+  updated_at: number
+}
+
+export interface CockpitSummary {
+  projects: number
+  versions: number
+  running: number
+  waiting: number
+  delivered: number
+  orphaned: number
+  idle: number
+}
+
+export interface CockpitData {
+  summary: CockpitSummary
+  running: CockpitItem[]
+  waiting: CockpitItem[]
+  delivered: CockpitItem[]
+  orphaned: CockpitItem[]
+  idle: CockpitItem[]
+}
+
+/** 全局驾驶舱：所有项目/版本的流水线实时状态汇总。 */
+export function getCockpit(): Promise<CockpitData> {
+  return flowJson('/cockpit')
+}
+
+// ---- 产出文件审计意见 + 基线 diff ----
+
+export interface AuditFinding {
+  id: string
+  version_id: string
+  stage: string
+  path: string
+  line: number | null
+  /** JSON 产物的结构化定位（如 functionalRequirements[0].acceptanceCriteria[1]）。 */
+  ref: string | null
+  severity: 'blocking' | 'suggestion'
+  comment: string
+  status: 'open' | 'resolved'
+  created_at: number
+  updated_at: number
+}
+
+export interface FileDiffLine {
+  type: 'context' | 'add' | 'del'
+  text: string
+}
+
+export interface FileDiff {
+  path: string
+  has_baseline: boolean
+  baseline_name: string | null
+  diff: FileDiffLine[]
+  is_new: boolean
+  is_unchanged: boolean
+}
+
+/** 某版本的全部审计意见（可按阶段过滤）。 */
+export function getAuditFindings(versionId: string, stage?: string): Promise<{ findings: AuditFinding[] }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit${stage ? `?stage=${encodeURIComponent(stage)}` : ''}`)
+}
+
+/** 新建一条审计意见。line 用于代码文件行号；ref 用于 JSON 产物结构化定位。 */
+export function createAuditFinding(
+  versionId: string, body: { stage: string; path: string; line: number | null; ref: string | null; severity: 'blocking' | 'suggestion'; comment: string },
+): Promise<{ finding: AuditFinding }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** 更新审计意见（status/severity/comment/line）。 */
+export function updateAuditFinding(
+  versionId: string, findingId: string, body: Partial<Pick<AuditFinding, 'line' | 'severity' | 'comment' | 'status'>>,
+): Promise<{ finding: AuditFinding }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit/${encodeURIComponent(findingId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+/** 删除一条审计意见。 */
+export function deleteAuditFinding(versionId: string, findingId: string): Promise<{ ok: boolean }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit/${encodeURIComponent(findingId)}`, { method: 'DELETE' })
+}
+
+/** 某文件相对基线的结构化行 diff。 */
+export function getFileDiff(versionId: string, path: string): Promise<FileDiff> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/diff?path=${encodeURIComponent(path)}`)
+}
+
+/** 一次 gate 审批记录（版本审计链的一环）。 */
+export interface GateRecord {
+  id: number
+  session_id: string
+  agent: string
+  ts: number
+  kind: string
+  detail: string
+  outcome: 'approve' | 'revise'
+  version_id: string | null
+  stage: string | null
+  round_no: number | null
+  finding_ids: string[]
+}
+
+/** 某版本的 gate 审批历史（轮次 + 决策 + 反馈 + 本轮提交意见）。 */
+export function getGateHistory(versionId: string): Promise<{ records: GateRecord[] }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/gate-history`)
+}
+
+/** 审计意见变更日志（append-only 留痕）。 */
+export interface AuditLogEntry {
+  id: number
+  finding_id: string | null
+  version_id: string
+  stage: string
+  action: 'create' | 'update' | 'delete'
+  before: AuditFinding | null
+  after: AuditFinding | null
+  ts: number
+}
+
+/** 某版本的审计意见变更日志。 */
+export function getAuditLog(versionId: string): Promise<{ logs: AuditLogEntry[] }> {
+  return flowJson(`/versions/${encodeURIComponent(versionId)}/audit-log`)
+}
+
+// ---- 附件上传（需求/人工补充 附带文件）----
+
+/** 上传附件到工作目录 attachments/，返回相对路径。 */
+export function uploadAttachment(cwd: string, name: string, contentBase64: string): Promise<{ ok: boolean; rel: string; name: string }> {
+  return flowJson('/attachments', {
+    method: 'POST',
+    body: JSON.stringify({ cwd, name, content_base64: contentBase64 }),
+  })
+}
