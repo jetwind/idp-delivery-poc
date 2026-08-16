@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { createVersion, deliverVersion, getProject, suggestVersionName, type Project, type Version } from '@/api/flow'
 import { useProject } from '@/hooks/project'
 import { PageHeader, Pill } from '@/components/common'
+import AttachmentPicker, { type Attachment, attachmentBlock } from '@/components/AttachmentPicker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -21,6 +22,7 @@ export default function ProjectDetail() {
   const [newName, setNewName] = useState('')
   const [newReq, setNewReq] = useState('')
   const [newNote, setNewNote] = useState('')
+  const [newAttachments, setNewAttachments] = useState<Attachment[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [delivering, setDelivering] = useState<string | null>(null)
@@ -43,7 +45,7 @@ export default function ProjectDetail() {
   }
 
   async function openCreate() {
-    setErr(null); setNewReq(''); setNewNote('')
+    setErr(null); setNewReq(''); setNewNote(''); setNewAttachments([])
     if (pid) {
       try { setNewName((await suggestVersionName(pid)).name) } catch { setNewName('') }
     }
@@ -54,7 +56,8 @@ export default function ProjectDetail() {
     if (!pid || !newReq.trim()) { setErr('请填写该版本的需求描述'); return }
     setBusy(true); setErr(null)
     try {
-      await createVersion(pid, newName.trim(), newReq.trim(), newNote.trim())
+      const fullReq = newReq.trim() + attachmentBlock(newAttachments)
+      await createVersion(pid, newName.trim(), fullReq, newNote.trim())
       setCreateOpen(false)
       await load()
     } catch (e) {
@@ -146,6 +149,10 @@ export default function ProjectDetail() {
               <span className="text-xs text-slate-500 mb-1.5 block">本版本需求 <b className="text-rose-500">*</b></span>
               <Textarea rows={4} value={newReq} onChange={e => setNewReq(e.target.value)} placeholder="这一版要交付的新需求…" />
             </label>
+            <div>
+              <span className="text-xs text-slate-500 mb-1.5 block">需求附件（可选）</span>
+              <AttachmentPicker cwd={project?.cwd ?? ''} onChange={setNewAttachments} />
+            </div>
             <label className="block">
               <span className="text-xs text-slate-500 mb-1.5 block">备注（可选）</span>
               <Input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="如：客户二期需求" />

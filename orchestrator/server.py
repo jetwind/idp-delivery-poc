@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import difflib
 import json
 import os
@@ -405,6 +406,36 @@ async def projects_create(req: ProjectCreateRequest) -> dict[str, Any]:
 @app.get("/projects")
 async def projects_list() -> dict[str, Any]:
     return {"projects": project_store.list_projects()}
+
+
+class AttachmentRequest(BaseModel):
+    cwd: str
+    name: str
+    content_base64: str
+
+
+@app.post("/attachments")
+async def upload_attachment(req: AttachmentRequest) -> dict[str, Any]:
+    """上传附件到 <cwd>/attachments/（供 agent 在流水线里阅读），返回相对路径。"""
+    name = os.path.basename(req.name.replace("\\", "/")).strip()
+    if not name or name in (".", ".."):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    try:
+        data = base64.b64decode(req.content_base64)
+    except Exception as exc:  # noqa: BLE001 - 解码失败按非法请求处理
+        raise HTTPException(status_code=400, detail="文件内容解码失败") from exc
+    if not data:
+        raise HTTPException(status_code=400, detail="文件内容为空")
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="附件超过 20MB 上限")
+    cwd = _resolve_cwd(req.cwd)
+    attach_dir = os.path.join(cwd, "attachments")
+    os.makedirs(attach_dir, exist_ok=True)
+    safe_name = f"{uuid.uuid4().hex[:8]}-{name}"
+    full = os.path.join(attach_dir, safe_name)
+    with open(full, "wb") as f:
+        f.write(data)
+    return {"ok": True, "rel": f"attachments/{safe_name}", "name": name}
 
 
 @app.get("/projects/{pid}")

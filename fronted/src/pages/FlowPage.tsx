@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import WorkspaceFileBrowser from '@/components/WorkspaceFileBrowser'
 import ArtifactReviewDialog from '@/components/ArtifactReviewDialog'
+import AttachmentPicker, { type Attachment, attachmentBlock } from '@/components/AttachmentPicker'
 import { Play, Loader2, CheckCircle2, XCircle, Send, RotateCcw, Sparkles, ShieldCheck, FileText, TriangleAlert, Terminal, Bot, Wrench, MessageSquare, ListChecks, Circle, History, ChevronDown } from 'lucide-react'
 
 const STAGES = [
@@ -29,6 +30,7 @@ export default function FlowPage() {
   const [answers, setAnswers] = useState<Record<string, string[]>>({})
   const [customs, setCustoms] = useState<Record<string, string>>({})
   const [gateFeedback, setGateFeedback] = useState('')
+  const [gateAttachments, setGateAttachments] = useState<Attachment[]>([])
   const [logs, setLogs] = useState<FlowEvent[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [running, setRunning] = useState(false)
@@ -179,13 +181,14 @@ export default function FlowPage() {
           : []
         answer = {
           action: 'revise',
-          feedback: gateFeedback.trim(),
+          feedback: gateFeedback.trim() + attachmentBlock(gateAttachments),
           findings: findings.map(f => ({ id: f.id, path: f.path, line: f.line, ref: f.ref, severity: f.severity, comment: f.comment })),
         }
       }
       await resumeFlow(threadId!, answer)
       setSnapshot(s => s ? { ...s, pending: null, validation: { status: 'pending', attempts: 0, error: null } } : s)
       setGateFeedback('')
+      setGateAttachments([])
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -450,12 +453,16 @@ export default function FlowPage() {
                 placeholder="补充矫正意见（必填），例如：需求里缺少性能指标、字段命名改为 xxx、补充异常场景…"
                 className="mb-3 text-xs"
               />
+              <div className="mb-3">
+                <AttachmentPicker cwd={snapshot?.cwd ?? ''} onChange={setGateAttachments} />
+                <p className="mt-1.5 text-[11px] text-slate-400">可附参考文档/截图，随补充意见一起给 agent。</p>
+              </div>
               <div className="flex gap-2">
                 <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => submitGate('approve')}>
                   {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
                   确认通过
                 </Button>
-                <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50" disabled={busy || !gateFeedback.trim()} onClick={() => submitGate('revise')}>
+                <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50" disabled={busy || (!gateFeedback.trim() && gateAttachments.length === 0)} onClick={() => submitGate('revise')}>
                   <XCircle className="w-3.5 h-3.5 mr-1" />补充矫正
                 </Button>
               </div>

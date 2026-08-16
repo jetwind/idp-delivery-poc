@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { createProject } from '@/api/flow'
 import { PageHeader } from '@/components/common'
+import AttachmentPicker, { type Attachment, attachmentBlock } from '@/components/AttachmentPicker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -12,6 +13,7 @@ export default function ProjectCreate() {
   const [name, setName] = useState('')
   const [requirement, setRequirement] = useState('')
   const [cwd, setCwd] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -21,7 +23,8 @@ export default function ProjectCreate() {
     }
     setBusy(true); setErr(null)
     try {
-      const r = await createProject(name.trim(), requirement.trim(), cwd.trim())
+      const fullReq = requirement.trim() + attachmentBlock(attachments)
+      const r = await createProject(name.trim(), fullReq, cwd.trim())
       nav(`/projects/${r.project.id}/flow`)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -62,6 +65,11 @@ export default function ProjectCreate() {
           />
           <p className="mt-1.5 text-[11px] text-slate-400">本地已存在目录或可 clone 的 git URL；产物会写到这里并按阶段 git commit。</p>
         </label>
+        <div>
+          <span className="text-xs text-slate-500 mb-1.5 block">需求附件（可选）</span>
+          <AttachmentPicker cwd={cwd.trim()} onChange={setAttachments} />
+          <p className="mt-1.5 text-[11px] text-slate-400">需求文档、截图等，会放到工作目录 attachments/ 下供 agent 阅读。</p>
+        </div>
 
         {err && (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{err}</div>

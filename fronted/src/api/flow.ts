@@ -622,3 +622,13 @@ export interface AuditLogEntry {
 export function getAuditLog(versionId: string): Promise<{ logs: AuditLogEntry[] }> {
   return flowJson(`/versions/${encodeURIComponent(versionId)}/audit-log`)
 }
+
+// ---- 附件上传（需求/人工补充 附带文件）----
+
+/** 上传附件到工作目录 attachments/，返回相对路径。 */
+export function uploadAttachment(cwd: string, name: string, contentBase64: string): Promise<{ ok: boolean; rel: string; name: string }> {
+  return flowJson('/attachments', {
+    method: 'POST',
+    body: JSON.stringify({ cwd, name, content_base64: contentBase64 }),
+  })
+}
