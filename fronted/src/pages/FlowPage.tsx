@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { continueFlow, getFlowEvents, getFlowFile, getFlowFiles, getFlowState, getProject, resumeFlow, startFlow, startProjectFlow, type FlowEvent, type FlowFile, type FlowQuestion, type FlowSnapshot, type Project, type QuestionInterrupt, type TodoItem } from '@/api/flow'
+import { continueFlow, getFlowEvents, getFlowFile, getFlowFiles, getFlowState, getVersion, resumeFlow, startVersionFlow, type FlowEvent, type FlowFile, type FlowQuestion, type FlowSnapshot, type QuestionInterrupt, type TodoItem, type Version } from '@/api/flow'
 import { PageHeader, Pill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -15,14 +15,11 @@ const STAGES = [
   { id: 'testing', name: '05 测试' },
 ]
 
-const DEFAULT_CWD = ''
-
 export default function FlowPage() {
-  const { pid } = useParams()
+  const { pid, vid } = useParams()
   const nav = useNavigate()
-  const [project, setProject] = useState<Project | null>(null)
+  const [version, setVersion] = useState<Version | null>(null)
   const [requirement, setRequirement] = useState('')
-  const [cwd, setCwd] = useState(DEFAULT_CWD)
   const [threadId, setThreadId] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<FlowSnapshot | null>(null)
   const [busy, setBusy] = useState(false)
@@ -45,19 +42,18 @@ export default function FlowPage() {
 
   useEffect(() => () => stopPolling(), [stopPolling])
 
-  // 项目模式：加载项目，若有历史 thread 则继续（resume）该流水线。
+  // 版本模式：加载版本，若有历史 thread 则继续（resume）该流水线。
   useEffect(() => {
-    if (!pid) return
+    if (!vid) return
     let alive = true
-    getProject(pid).then(r => {
+    getVersion(vid).then(r => {
       if (!alive) return
-      setProject(r.project)
-      setRequirement(r.project.requirement_text)
-      setCwd(r.project.cwd)
-      if (r.project.thread_id) setThreadId(r.project.thread_id)
-    }).catch(() => { /* 项目不存在则停留在输入态 */ })
+      setVersion(r.version)
+      setRequirement(r.version.requirement_text)
+      if (r.version.thread_id) setThreadId(r.version.thread_id)
+    }).catch(() => { /* 版本不存在则停留在输入态 */ })
     return () => { alive = false }
-  }, [pid])
+  }, [vid])
 
   // 启动后轮询：状态单独拉（快，pending 立即生效）；日志单独异步更新（慢也不阻塞状态）。
   useEffect(() => {
@@ -100,11 +96,10 @@ export default function FlowPage() {
   }, [logs])
 
   async function handleStart() {
+    if (!vid) return
     setBusy(true); setError(null); setSnapshot(null)
     try {
-      const snap = pid
-        ? await startProjectFlow(pid)
-        : await startFlow(requirement.trim(), cwd.trim())
+      const snap = await startVersionFlow(vid)
       setThreadId(snap.thread_id)
       setSnapshot(snap)
       setAnswers({}); setCustoms({})
@@ -115,13 +110,9 @@ export default function FlowPage() {
     }
   }
 
-  // 重新开始：项目模式则新建一个 thread（旧流水线保留在 checkpoint，可另行处理）。
+  // 重新开始：新建一个 thread（旧流水线保留在 checkpoint，可另行处理）。
   function restart() {
-    if (pid) {
-      if (window.confirm('重新开始会启动一条新的流水线，确认？')) handleStart()
-    } else {
-      reset()
-    }
+    if (window.confirm('重新开始会为当前版本启动一条新的流水线，确认？')) handleStart()
   }
 
   // 继续一个因编排层重启而「孤儿化」的流程（从上次 checkpoint 推进到下一个 interrupt）。
@@ -198,11 +189,11 @@ export default function FlowPage() {
   return (
     <div>
       <PageHeader
-        title={project ? `${project.name} · AI 流水线` : 'AI 交付流水线'}
-        desc={project ? (project.requirement_text.length > 60 ? project.requirement_text.slice(0, 60) + '…' : project.requirement_text) : '输入需求 → 需求→设计→编码→测试逐阶段由 harness agent 真实执行，每阶段人工 gate 确认后推进'}
+        title={version ? `${version.name} · AI 流水线` : 'AI 交付流水线'}
+        desc={version ? (version.requirement_text.length > 60 ? version.requirement_text.slice(0, 60) + '…' : version.requirement_text) : '输入需求 → 需求→设计→编码→测试逐阶段由 harness agent 真实执行，每阶段人工 gate 确认后推进'}
         extra={threadId
           ? <Button variant="outline" size="sm" onClick={restart}><RotateCcw className="w-3.5 h-3.5 mr-1" />重新开始</Button>
-          : pid ? <Button variant="outline" size="sm" onClick={() => nav('/projects')}>返回项目列表</Button> : undefined}
+          : <Button variant="outline" size="sm" onClick={() => nav(`/projects/${pid}`)}>返回版本列表</Button>}
       />
 
       {/* 阶段条（可点击回溯） */}
@@ -237,50 +228,24 @@ export default function FlowPage() {
         <div className="mt-2 text-[11px] text-slate-400">点击已开始/进行中的阶段可回溯查看其日志与产出；再次点击取消。</div>
       </div>
 
-      {/* 输入需求 / 项目启动 */}
-      {!threadId && (pid ? (
+      {/* 版本需求 / 启动 */}
+      {!threadId && (
         <div className="bg-white rounded-lg border border-slate-200/80 px-5 py-4 mb-4">
           <div className="flex items-center gap-2 mb-2">
             <Sparkles className="w-4 h-4 text-indigo-500" />
-            <span className="text-[13px] font-semibold text-slate-800">项目需求</span>
-            <Pill tone="violet">{project?.name ?? pid}</Pill>
+            <span className="text-[13px] font-semibold text-slate-800">版本需求</span>
+            <Pill tone="violet">{version?.name ?? vid}</Pill>
           </div>
           <div className="text-sm text-slate-700 whitespace-pre-wrap leading-6">{requirement || '加载中…'}</div>
-          <div className="mt-1.5 text-xs text-slate-400 font-mono">工作目录：{cwd}</div>
           <div className="mt-4 flex items-center gap-2">
-            <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" disabled={busy || !project} onClick={handleStart}>
+            <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" disabled={busy || !version} onClick={handleStart}>
               {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}
               启动流水线
             </Button>
-            <Button size="sm" variant="outline" onClick={() => nav('/projects')}>返回项目列表</Button>
+            <Button size="sm" variant="outline" onClick={() => nav(`/projects/${pid}`)}>返回版本列表</Button>
           </div>
         </div>
-      ) : (
-        <div className="bg-white rounded-lg border border-slate-200/80 px-5 py-4 mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-4 h-4 text-indigo-500" />
-            <span className="text-[13px] font-semibold text-slate-800">输入项目需求</span>
-          </div>
-          <Textarea
-            rows={4}
-            value={requirement}
-            onChange={e => setRequirement(e.target.value)}
-            placeholder="用一句话描述你要交付的项目，例如：帮我做一个一物一码的产品追溯系统，需要支持扫码溯源和防窜货。"
-          />
-          <div className="mt-3 flex items-center gap-2">
-            <input
-              value={cwd}
-              onChange={e => setCwd(e.target.value)}
-              className="flex-1 h-8 rounded-md border border-slate-200 px-2 text-xs font-mono text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="工作目录，如 <仓库路径>/examples/project-delivery（agent 干活的地方）"
-            />
-            <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" disabled={busy || !requirement.trim() || !cwd.trim()} onClick={handleStart}>
-              {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}
-              启动流水线
-            </Button>
-          </div>
-        </div>
-      ))}
+      )}
 
       {/* 错误 */}
       {error && (

@@ -332,12 +332,37 @@ async def start(req: StartRequest) -> dict[str, Any]:
     return await _start_flow(req.requirement_text, req.cwd)
 
 
-# ---- 交付项目管理（进入流水线的入口）----
+# ---- 交付项目管理（项目 → 版本 → 流水线）----
 
 class ProjectCreateRequest(BaseModel):
     name: str
     requirement_text: str
     cwd: str
+
+
+class VersionCreateRequest(BaseModel):
+    name: str | None = None
+    requirement_text: str
+    note: str = ""
+
+
+def _git_tag(cwd: str, tag: str) -> bool:
+    """在项目 git 仓库打 tag（尽力而为；cwd 非独立 git 仓库时静默失败）。"""
+    try:
+        r = subprocess.run(
+            ["git", "tag", tag], cwd=cwd, check=False, capture_output=True,
+            timeout=30, stdin=subprocess.DEVNULL,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+async def _start_version_flow(ver: dict) -> dict[str, Any]:
+    proj = project_store.get_project(ver["project_id"])
+    snap = await _start_flow(ver["requirement_text"], (proj or {}).get("cwd", ""))
+    project_store.set_version_thread(ver["id"], snap["thread_id"])
+    return snap
 
 
 @app.post("/projects")
@@ -372,15 +397,64 @@ async def projects_delete(pid: str) -> dict[str, Any]:
     return {"id": pid, "ok": True}
 
 
-@app.post("/projects/{pid}/flow")
-async def projects_start_flow(pid: str) -> dict[str, Any]:
-    """启动（或重新开始）该项目的流水线：新建 thread，链接到项目，返回快照。"""
+@app.post("/projects/{pid}/versions")
+async def versions_create(pid: str, req: VersionCreateRequest) -> dict[str, Any]:
+    """基于当前基线新建一个版本（客户新需求 = 新版本，不是新项目）。"""
     proj = project_store.get_project(pid)
     if proj is None:
         raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
-    snap = await _start_flow(proj["requirement_text"], proj["cwd"])
-    project_store.set_thread(pid, snap["thread_id"])
-    return snap
+    if not req.requirement_text.strip():
+        raise HTTPException(status_code=400, detail="该版本的需求描述不能为空")
+    ver = project_store.create_version(pid, req.name or "", req.requirement_text.strip(), req.note.strip())
+    return {"version": ver}
+
+
+@app.get("/projects/{pid}/versions/suggest")
+async def versions_suggest(pid: str) -> dict[str, Any]:
+    return {"name": project_store.suggest_version_name(pid)}
+
+
+@app.post("/projects/{pid}/flow")
+async def projects_start_flow(pid: str) -> dict[str, Any]:
+    """启动（或重新开始）该项目【当前版本】的流水线。"""
+    proj = project_store.get_project(pid)
+    if proj is None:
+        raise HTTPException(status_code=404, detail=f"项目不存在：{pid}")
+    cur = proj.get("current_version")
+    if cur is None:
+        raise HTTPException(status_code=404, detail=f"项目 {pid} 尚无版本")
+    return await _start_version_flow(cur)
+
+
+@app.post("/versions/{vid}/flow")
+async def version_start_flow(vid: str) -> dict[str, Any]:
+    """启动（或重新开始）某版本的流水线。"""
+    ver = project_store.get_version(vid)
+    if ver is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
+    return await _start_version_flow(ver)
+
+
+@app.get("/versions/{vid}")
+async def version_get(vid: str) -> dict[str, Any]:
+    ver = project_store.get_version(vid)
+    if ver is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
+    return {"version": ver}
+
+
+@app.post("/versions/{vid}/deliver")
+async def version_deliver(vid: str) -> dict[str, Any]:
+    """标记版本已交付：落库状态 + 尽力在项目 git 仓库打 tag。"""
+    ver = project_store.get_version(vid)
+    if ver is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{vid}")
+    proj = project_store.get_project(ver["project_id"])
+    cwd = (proj or {}).get("cwd", "")
+    tag = ver["name"]
+    _git_tag(cwd, tag)
+    project_store.mark_version_delivered(vid, tag)
+    return {"id": vid, "name": tag, "ok": True}
 
 
 @app.get("/flow/state/{thread_id}")

@@ -23,7 +23,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       title: '项目中心',
       items: [
         { to: '/projects', label: '项目列表', icon: LayoutGrid, end: true },
-        { to: `${P}/flow`, label: 'AI 流水线', icon: Workflow },
+        { to: `${P}`, label: '项目详情', icon: Workflow },
       ],
     },
     {
@@ -156,7 +156,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
 function crumbMap(path: string, projectName?: string): string {
   if (/^\/projects\/new/.test(path)) return '新增项目'
-  if (/^\/projects\/[^/]+\/flow/.test(path)) return `${projectName ?? '项目'} · AI 流水线`
+  if (/^\/projects\/[^/]+\/versions\/[^/]+\/flow/.test(path)) return '版本 · AI 流水线'
+  if (/^\/projects\/[^/]+$/.test(path)) return '项目详情'
   if (/^\/projects$/.test(path)) return '项目列表'
   if (/^\/knowledge\/standards/.test(path)) return '知识库 · 工程标准'
   const map: [RegExp, string][] = [
