@@ -147,6 +147,20 @@ def get_project(pid: str) -> dict | None:
         conn.close()
 
 
+def list_versions() -> list[dict]:
+    """所有项目下的所有版本（含项目名与 cwd），按 updated_at 倒序，供全局驾驶舱汇总。"""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT v.*, p.name AS project_name, p.cwd AS cwd FROM versions v "
+            "LEFT JOIN projects p ON p.id = v.project_id "
+            "ORDER BY v.updated_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def delete_project(pid: str) -> bool:
     conn = _conn()
     try:

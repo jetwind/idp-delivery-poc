@@ -1,18 +1,82 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { cockpit as c } from '@/mock/data5'
 import { Section, Pill, Bar, AIPill } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   Bot, Activity, Wallet, ShieldAlert, UserCheck, ArrowRight, Sparkles,
-  ClipboardCheck, CircleDollarSign, Gauge, Target, AlertTriangle,
+  CircleDollarSign, Gauge, AlertTriangle, CheckCircle2, RotateCcw,
 } from 'lucide-react'
+import {
+  getCockpit, getAgentsCost, getAgentsAudit,
+  type CockpitData, type CockpitItem, type AgentsCost, type AuditRecord,
+} from '@/api/flow'
 
-const waitTone: Record<string, any> = { 'Human Gate': 'amber', '输入补全': 'red', 'AI 结果确认': 'violet', '审批': 'cyan' }
+const STAGE_COUNT = 5
+
+/** 等待人工的 interrupt 类型 → 徽章样式。 */
+const waitTone: Record<string, 'amber' | 'red' | 'violet' | 'cyan'> = {
+  gate: 'amber', question: 'red', approval: 'cyan',
+}
+
+/** 审计记录 outcome → 徽章样式。 */
+function auditTone(kind: string, outcome: string): { tone: 'green' | 'amber' | 'rose' | 'slate'; label: string } {
+  if (kind === 'approval') {
+    if (['拒绝', 'rejected', 'reject'].includes(outcome)) return { tone: 'rose', label: '已拒绝' }
+    return { tone: 'green', label: '已批准' }
+  }
+  if (kind === 'gate') {
+    if (['revise', '退回'].includes(outcome)) return { tone: 'amber', label: '退回' }
+    return { tone: 'green', label: '通过' }
+  }
+  return { tone: 'slate', label: outcome || '—' }
+}
+
+function flowHref(item: CockpitItem): string {
+  return `/projects/${item.project_id}/versions/${item.version_id}/flow`
+}
 
 export default function AICockpit() {
   const nav = useNavigate()
-  const s = c.stats
+  const [data, setData] = useState<CockpitData | null>(null)
+  const [cost, setCost] = useState<AgentsCost | null>(null)
+  const [audits, setAudits] = useState<AuditRecord[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  // 流水线实时状态：每 8s 轮询一次（轻量；只查有 thread 的版本 checkpoint）。
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const d = await getCockpit()
+        if (!cancelled) setData(d)
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message)
+      }
+    }
+    load()
+    const t = setInterval(load, 8000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [])
+
+  // 成本 / 审计：一次性拉取。
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [c, a] = await Promise.all([getAgentsCost(), getAgentsAudit()])
+        if (cancelled) return
+        setCost(c)
+        setAudits(a.audits)
+      } catch { /* 成本/审计失败不影响驾驶舱主视图 */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const s = data?.summary
+  const running = data?.running ?? []
+  const waiting = [...(data?.waiting ?? []), ...(data?.orphaned ?? [])]
+
   return (
     <div>
       {/* 顶部说明 */}
@@ -22,27 +86,35 @@ export default function AICockpit() {
             <AIPill>AI 驾驶舱</AIPill>
             <h1 className="text-lg font-semibold">AI 正在推进项目，人在关键节点确认与补全</h1>
           </div>
-          <p className="mt-1.5 text-xs text-indigo-100">今日执行 {s.todayTasks} 项任务 · 本周累计 {s.weekTasks} 项 · AI 结果人工接受率 {s.acceptance}% · Human Gate 首轮通过率 {s.firstPass}%</p>
+          <p className="mt-1.5 text-xs text-indigo-100">
+            执行中 {s?.running ?? 0} 项 · 等待人工 {s?.waiting ?? 0} 项 · 已交付 {s?.delivered ?? 0} 项 · 共 {s?.versions ?? 0} 个版本 / {s?.projects ?? 0} 个项目
+          </p>
         </div>
         <Button variant="outline" className="bg-white/10 border-white/30 text-white hover:bg-white/20" onClick={() => nav('/agents')}>
           <Bot className="w-4 h-4 mr-1.5" />数字员工中心
         </Button>
       </div>
 
+      {error && (
+        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-600">
+          驾驶舱数据加载失败：{error}
+        </div>
+      )}
+
       {/* 指标 */}
       <div className="grid grid-cols-4 gap-3 mb-4">
         {[
-          { icon: Activity, label: '执行中任务', value: '2 项', sub: 'Coding Agent + CI 联动', tone: 'text-violet-600 bg-violet-50' },
-          { icon: UserCheck, label: '等待人工介入', value: '4 项', sub: '2 项正在阻塞流程', tone: 'text-amber-600 bg-amber-50' },
-          { icon: ShieldAlert, label: '安全拦截（7 天）', value: '2 次', sub: '越权访问 / 分支外提交', tone: 'text-rose-600 bg-rose-50' },
-          { icon: Wallet, label: '本月 AI 成本', value: `¥${s.monthCost.toLocaleString()}`, sub: `预算 ¥${s.budget.toLocaleString()} · 已用 42%`, tone: 'text-emerald-600 bg-emerald-50' },
+          { icon: Activity, label: '执行中任务', value: `${s?.running ?? 0} 项`, sub: '后台流水线实时推进', tone: 'text-violet-600 bg-violet-50' },
+          { icon: UserCheck, label: '等待人工介入', value: `${s?.waiting ?? 0} 项`, sub: `${s?.orphaned ?? 0} 项待继续执行`, tone: 'text-amber-600 bg-amber-50' },
+          { icon: ShieldAlert, label: '已交付', value: `${s?.delivered ?? 0} 项`, sub: `另有 ${s?.idle ?? 0} 个版本未启动`, tone: 'text-emerald-600 bg-emerald-50' },
+          { icon: Wallet, label: '本月 AI 成本', value: `¥${(cost?.totalCost ?? 0).toLocaleString()}`, sub: `${((cost?.totalTokens ?? 0) / 1000).toFixed(0)}K tokens 累计`, tone: 'text-cyan-600 bg-cyan-50' },
         ].map(m => (
           <div key={m.label} className="bg-white rounded-lg border border-slate-200/80 px-4 py-4 flex items-center gap-3.5">
-            <span className={cn('w-10 h-10 rounded-lg flex items-center justify-center', m.tone)}><m.icon className="w-5 h-5" /></span>
-            <div>
+            <span className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0', m.tone)}><m.icon className="w-5 h-5" /></span>
+            <div className="min-w-0">
               <div className="text-xs text-slate-400">{m.label}</div>
               <div className="text-lg font-semibold text-slate-800 leading-6">{m.value}</div>
-              <div className="text-[11px] text-slate-400">{m.sub}</div>
+              <div className="text-[11px] text-slate-400 truncate">{m.sub}</div>
             </div>
           </div>
         ))}
@@ -50,82 +122,91 @@ export default function AICockpit() {
 
       <div className="grid grid-cols-2 gap-4 items-start">
         {/* AI 正在执行 */}
-        <Section title="AI 正在执行" desc="实时任务进度" extra={<Pill tone="violet" dot>{c.running.length} 项</Pill>}>
+        <Section title="AI 正在执行" desc="跨项目实时任务进度" extra={<Pill tone="violet" dot>{running.length} 项</Pill>}>
           <div className="space-y-3 pt-1">
-            {c.running.map(r => (
-              <div key={r.task} className="rounded-lg border border-violet-100 bg-violet-50/40 p-4">
+            {running.length === 0 && <div className="text-xs text-slate-400 py-4 text-center">当前没有正在执行的流水线</div>}
+            {running.map(r => (
+              <button key={r.version_id} onClick={() => nav(flowHref(r))}
+                className="w-full rounded-lg border border-violet-100 bg-violet-50/40 p-4 text-left hover:border-violet-300 transition-colors">
                 <div className="flex items-center gap-2">
                   <Bot className="w-4 h-4 text-violet-600" />
-                  <span className="text-[13px] font-semibold text-slate-800">{r.agent}</span>
-                  <Pill tone="blue" className="ml-auto">{r.stage}</Pill>
+                  <span className="text-[13px] font-semibold text-slate-800 truncate">{r.project_name} · {r.version_name}</span>
+                  <Pill tone="blue" className="ml-auto">{r.stage ?? '执行中'}</Pill>
                 </div>
-                <div className="mt-2 text-[13px] text-slate-700">{r.task}</div>
                 <div className="mt-2.5 flex items-center gap-3">
-                  <Bar value={r.progress} className="flex-1" tone="bg-violet-500" />
-                  <span className="text-xs font-semibold text-violet-600">{r.progress}%</span>
+                  <Bar value={(r.stage_index / STAGE_COUNT) * 100} className="flex-1" tone="bg-violet-500" />
+                  <span className="text-xs font-semibold text-violet-600">{Math.round((r.stage_index / STAGE_COUNT) * 100)}%</span>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-                  <span>{r.sub}</span><span>{r.eta} · {r.tokens}</span>
+                  <span>第 {Math.min(r.stage_index + 1, STAGE_COUNT)}/{STAGE_COUNT} 阶段</span>
+                  <span className="inline-flex items-center gap-1 text-violet-600 font-medium">查看执行详情<ArrowRight className="w-3 h-3" /></span>
                 </div>
-                <button onClick={() => nav('/projects/p1/tasks/n9')} className="mt-2.5 inline-flex items-center gap-1 text-xs font-medium text-violet-600 hover:underline">
-                  查看执行详情<ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </Section>
-
-        {/* 等待人工介入 */}
-        <Section title="等待人工介入" desc="AI 已就位，需要人确认、补全或决策" extra={<Pill tone="amber" dot>{c.waitingHuman.length} 项</Pill>}>
-          <div className="space-y-2 pt-1">
-            {c.waitingHuman.map(w => (
-              <button key={w.title}
-                onClick={() => nav(w.kind === 'Human Gate' ? '/projects/p1/gate' : w.kind === '输入补全' ? '/projects/p1/tasks/n12/complete' : w.kind === 'AI 结果确认' ? '/projects/p1/tasks/n8' : '/agents')}
-                className="w-full flex items-center gap-3 rounded-lg border border-slate-100 px-3.5 py-3 hover:border-indigo-200 hover:bg-indigo-50/30 transition-colors text-left group">
-                <Pill tone={waitTone[w.kind]}>{w.kind}</Pill>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13px] text-slate-800 truncate">{w.title}</div>
-                  <div className="mt-0.5 text-[11px] text-slate-400">处理人：{w.who} · {w.due}</div>
-                </div>
-                {w.blocking.includes('阻塞') && <span className="text-[10px] text-rose-500 bg-rose-50 rounded px-1.5 py-0.5 shrink-0">{w.blocking}</span>}
-                <ArrowRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-400 shrink-0" />
               </button>
             ))}
           </div>
         </Section>
 
-        {/* 安全与策略命中 */}
-        <Section title="安全与策略命中" desc="权限策略实时拦截记录" extra={<Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => nav('/agents')}>全部审计日志</Button>}>
-          <div className="space-y-2.5 pt-1">
-            {c.policyHits.map(p => (
-              <div key={p.time} className="flex items-start gap-3 rounded-lg border border-slate-100 px-3.5 py-2.5">
-                <AlertTriangle className={cn('w-4 h-4 mt-0.5 shrink-0', p.level === '高' ? 'text-rose-500' : p.level === '中' ? 'text-amber-500' : 'text-slate-400')} />
-                <div className="flex-1">
-                  <div className="text-xs leading-5 text-slate-700">{p.text}</div>
-                  <div className="mt-0.5 text-[11px] text-slate-400 font-mono">{p.time}</div>
-                </div>
-                <Pill tone={p.level === '高' ? 'red' : p.level === '中' ? 'amber' : 'slate'}>{p.level}</Pill>
-              </div>
-            ))}
+        {/* 等待人工介入 */}
+        <Section title="等待人工介入" desc="AI 已就位，需要人确认、补全或决策" extra={<Pill tone="amber" dot>{waiting.length} 项</Pill>}>
+          <div className="space-y-2 pt-1">
+            {waiting.length === 0 && <div className="text-xs text-slate-400 py-4 text-center">当前没有需要人工介入的项</div>}
+            {waiting.map(w => {
+              const orphaned = !w.pending_label
+              return (
+                <button key={w.version_id} onClick={() => nav(flowHref(w))}
+                  className="w-full flex items-center gap-3 rounded-lg border border-slate-100 px-3.5 py-3 hover:border-indigo-200 hover:bg-indigo-50/30 transition-colors text-left group">
+                  {orphaned ? (
+                    <Pill tone="slate"><RotateCcw className="w-3 h-3" />可继续</Pill>
+                  ) : (
+                    <Pill tone={waitTone[w.pending_type ?? ''] ?? 'slate'}>{w.pending_label}</Pill>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] text-slate-800 truncate">{w.project_name} · {w.version_name}</div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">{orphaned ? '编排层重启后暂停，点击继续执行' : `阶段：${w.stage ?? '—'}`}</div>
+                  </div>
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-400 shrink-0" />
+                </button>
+              )
+            })}
           </div>
-          <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-100 px-3 py-2 text-xs text-emerald-700 flex items-center gap-1.5">
-            <ShieldAlert className="w-3.5 h-3.5" />所有拦截均已按策略自动处置，无人工遗漏。
+        </Section>
+
+        {/* 安全与策略命中 */}
+        <Section title="安全与人工确认" desc="审批与 gate 决策记录" extra={<Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => nav('/agents')}>全部审计日志</Button>}>
+          <div className="space-y-2.5 pt-1">
+            {audits.length === 0 && <div className="text-xs text-slate-400 py-4 text-center">暂无审批 / gate 记录</div>}
+            {audits.slice(0, 6).map(a => {
+              const t = auditTone(a.kind, a.outcome)
+              return (
+                <div key={a.id} className="flex items-start gap-3 rounded-lg border border-slate-100 px-3.5 py-2.5">
+                  {a.kind === 'approval'
+                    ? <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-400" />
+                    : <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-500" />}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs leading-5 text-slate-700">{a.detail}</div>
+                    <div className="mt-0.5 text-[11px] text-slate-400 font-mono">
+                      {a.agent} · {new Date(a.ts).toLocaleString()}
+                    </div>
+                  </div>
+                  <Pill tone={t.tone}>{t.label}</Pill>
+                </div>
+              )
+            })}
           </div>
         </Section>
 
         {/* 成本概览 */}
-        <Section title="AI 成本概览" desc="本月预算执行" extra={<Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => nav('/agents')}>成本明细</Button>}>
+        <Section title="AI 成本概览" desc="按数字员工（阶段 agent）聚合" extra={<Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => nav('/agents')}>成本明细</Button>}>
           <div className="pt-1">
             <div className="flex items-end justify-between mb-1.5">
-              <span className="text-xs text-slate-500">本月已用</span>
-              <span className="text-[13px]"><b className="text-slate-800">¥{s.monthCost.toLocaleString()}</b><span className="text-slate-400 text-xs"> / ¥{s.budget.toLocaleString()}</span></span>
+              <span className="text-xs text-slate-500">累计成本（估算）</span>
+              <span className="text-[15px]"><b className="text-slate-800">¥{(cost?.totalCost ?? 0).toLocaleString()}</b></span>
             </div>
-            <Bar value={42} tone="bg-emerald-500" />
-            <div className="grid grid-cols-3 gap-2.5 mt-4">
+            <div className="grid grid-cols-3 gap-2.5 mt-3">
               {[
-                { icon: CircleDollarSign, label: '今日成本', value: `¥${s.todayCost}` },
-                { icon: Gauge, label: '任务均成本', value: '¥14.2' },
-                { icon: Target, label: '预期本月', value: '¥6,900' },
+                { icon: CircleDollarSign, label: '会话数', value: `${(cost?.agents ?? []).reduce((n, a) => n + a.sessions, 0)}` },
+                { icon: Gauge, label: '总 tokens', value: `${((cost?.totalTokens ?? 0) / 1000).toFixed(0)}K` },
+                { icon: Sparkles, label: '数字员工', value: `${cost?.agents.length ?? 0} 个` },
               ].map(m => (
                 <div key={m.label} className="rounded-lg bg-slate-50 px-3 py-3 text-center">
                   <m.icon className="w-4 h-4 text-slate-400 mx-auto" />
@@ -134,10 +215,17 @@ export default function AICockpit() {
                 </div>
               ))}
             </div>
-            <div className="mt-3.5 flex items-center gap-2 text-[11px] text-slate-400">
-              <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-              <ClipboardCheck className="w-3.5 h-3.5 text-cyan-500" />
-              代码开发占 52% · 分析评估占 24% · 规格生成占 15%，详见数字员工中心成本分析。
+            <div className="mt-3.5 space-y-1.5">
+              {(cost?.agents ?? []).filter(a => a.cost > 0).sort((x, y) => y.cost - x.cost).map(a => (
+                <div key={a.id} className="flex items-center gap-2 text-[11px]">
+                  <span className="text-slate-500 w-20 truncate">{a.name}</span>
+                  <Bar value={cost && cost.totalCost ? (a.cost / cost.totalCost) * 100 : 0} className="flex-1" tone="bg-emerald-500" />
+                  <span className="text-slate-400 w-14 text-right">¥{a.cost}</span>
+                </div>
+              ))}
+              {(cost?.agents ?? []).every(a => a.cost === 0) && (
+                <div className="text-[11px] text-slate-400">暂无 token 消耗记录。</div>
+              )}
             </div>
           </div>
         </Section>

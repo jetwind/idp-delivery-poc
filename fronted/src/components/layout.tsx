@@ -81,7 +81,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 <div className="px-3 py-4 text-xs text-slate-400 text-center">还没有项目，去「项目列表」新增</div>
               )}
               {projects.map(p => (
-                <DropdownMenuItem key={p.id} onClick={() => { setProjectId(p.id); nav(`/projects/${p.id}/flow`) }}
+                <DropdownMenuItem key={p.id} onClick={() => { setProjectId(p.id); nav(`/projects/${p.id}`) }}
                   className="flex items-center gap-2.5 py-2 cursor-pointer">
                   <span className={cn('w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-semibold shrink-0',
                     p.id === current?.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500')}>{p.name.slice(0, 1)}</span>
@@ -89,7 +89,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                     <span className="block text-[13px] text-slate-800 truncate">{p.name}</span>
                     <span className="block text-[11px] text-slate-400 font-mono">{p.id}</span>
                   </span>
-                  {p.thread_id && <Pill tone="green" className="shrink-0">有流水线</Pill>}
+                  {p.current_version?.thread_id && <Pill tone="green" className="shrink-0">有流水线</Pill>}
                   {p.id === current?.id && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
                 </DropdownMenuItem>
               ))}
@@ -140,7 +140,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-2 text-[13px] text-slate-500">
             <Link to="/projects" className="hover:text-slate-800">项目中心</Link>
             <span className="text-slate-300">/</span>
-            <span className="text-slate-800 font-medium truncate max-w-[320px]">{crumbMap(loc.pathname, current?.name)}</span>
+            <span className="text-slate-800 font-medium truncate max-w-[320px]">{crumbMap(loc.pathname)}</span>
           </div>
           <div className="flex-1" />
           <div className="hidden md:flex items-center gap-2 h-8 w-[280px] rounded-md bg-slate-100 px-3 text-xs text-slate-400">
@@ -154,7 +154,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   )
 }
 
-function crumbMap(path: string, projectName?: string): string {
+function crumbMap(path: string): string {
   if (/^\/projects\/new/.test(path)) return '新增项目'
   if (/^\/projects\/[^/]+\/versions\/[^/]+\/flow/.test(path)) return '版本 · AI 流水线'
   if (/^\/projects\/[^/]+$/.test(path)) return '项目详情'

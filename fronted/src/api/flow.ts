@@ -472,3 +472,46 @@ export function deliverVersion(id: string): Promise<{ ok: boolean }> {
 export function startProjectFlow(id: string): Promise<FlowSnapshot> {
   return flowJson(`/projects/${encodeURIComponent(id)}/flow`, { method: 'POST' })
 }
+
+// ---- AI 驾驶舱（全局汇总）----
+
+export interface CockpitItem {
+  version_id: string
+  version_name: string
+  project_id: string
+  project_name: string
+  status: string
+  stage_index: number
+  /** 当前阶段名（如「04 编码」），仅已启动的版本有。 */
+  stage?: string
+  thread_id: string | null
+  note: string
+  /** 等待人工时：gate / question / approval。 */
+  pending_type?: string | null
+  pending_label?: string
+  updated_at: number
+}
+
+export interface CockpitSummary {
+  projects: number
+  versions: number
+  running: number
+  waiting: number
+  delivered: number
+  orphaned: number
+  idle: number
+}
+
+export interface CockpitData {
+  summary: CockpitSummary
+  running: CockpitItem[]
+  waiting: CockpitItem[]
+  delivered: CockpitItem[]
+  orphaned: CockpitItem[]
+  idle: CockpitItem[]
+}
+
+/** 全局驾驶舱：所有项目/版本的流水线实时状态汇总。 */
+export function getCockpit(): Promise<CockpitData> {
+  return flowJson('/cockpit')
+}

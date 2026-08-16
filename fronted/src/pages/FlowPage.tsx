@@ -174,12 +174,6 @@ export default function FlowPage() {
     }
   }
 
-  function reset() {
-    stopPolling()
-    setThreadId(null); setSnapshot(null); setError(null); setAnswers({}); setCustoms({})
-    setLogs([]); setTodos([]); setRunning(false); setSelectedStage(null); seenRef.current = new Set()
-  }
-
   const pending = snapshot?.pending ?? null
   const stageIndex = snapshot?.stage_index ?? 0
   const selectedStageName = selectedStage ? STAGES.find(s => s.id === selectedStage)?.name : undefined

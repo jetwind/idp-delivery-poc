@@ -457,6 +457,85 @@ async def version_deliver(vid: str) -> dict[str, Any]:
     return {"id": vid, "name": tag, "ok": True}
 
 
+# ---- AI 驾驶舱（全局汇总：所有项目/版本的流水线实时状态）----
+
+_PENDING_LABEL = {
+    "gate": "人工确认",
+    "question": "输入补全",
+    "approval": "审批",
+}
+
+
+@app.get("/cockpit")
+async def cockpit() -> dict[str, Any]:
+    """全局驾驶舱：汇总所有项目/版本，按流水线实时状态归类。
+
+    每个版本有 thread_id 时读其 checkpoint 快照，判定为：
+    - waiting   有 pending interrupt（gate/question/approval）→ 等待人工
+    - running   后台图任务还在跑 → 执行中
+    - delivered stage 已完成（stage_index 越界）或已标记交付 → 已交付
+    - orphaned  有 checkpoint 但既不在跑也没 pending → 编排层重启后待「继续执行」
+    无 thread_id 的版本：已交付 → delivered，否则 idle（未启动）。
+    """
+    versions = project_store.list_versions()
+    running: list[dict[str, Any]] = []
+    waiting: list[dict[str, Any]] = []
+    delivered: list[dict[str, Any]] = []
+    orphaned: list[dict[str, Any]] = []
+    idle: list[dict[str, Any]] = []
+
+    for v in versions:
+        row: dict[str, Any] = {
+            "version_id": v["id"],
+            "version_name": v["name"],
+            "project_id": v["project_id"],
+            "project_name": v.get("project_name") or "",
+            "status": v.get("status") or "进行中",
+            "stage_index": v.get("stage_index") or 0,
+            "thread_id": v.get("thread_id"),
+            "note": v.get("note") or "",
+            "updated_at": v.get("updated_at") or 0,
+        }
+        tid = row["thread_id"]
+        if not tid:
+            (delivered if row["status"] == "已交付" else idle).append(row)
+            continue
+        snap = await _snapshot(tid)
+        row["stage_index"] = snap["stage_index"]
+        row["stage"] = snap["stage"]
+        pending = snap.get("pending")
+        if pending:
+            ptype = pending.get("type") if isinstance(pending, dict) else None
+            row["pending_type"] = ptype
+            row["pending_label"] = _PENDING_LABEL.get(ptype, "待处理")
+            waiting.append(row)
+        elif snap.get("flow_running"):
+            running.append(row)
+        elif snap.get("done"):
+            row["status"] = "已交付"
+            delivered.append(row)
+        else:
+            orphaned.append(row)
+
+    projects = project_store.list_projects()
+    return {
+        "summary": {
+            "projects": len(projects),
+            "versions": len(versions),
+            "running": len(running),
+            "waiting": len(waiting),
+            "delivered": len(delivered),
+            "orphaned": len(orphaned),
+            "idle": len(idle),
+        },
+        "running": running,
+        "waiting": waiting,
+        "delivered": delivered,
+        "orphaned": orphaned,
+        "idle": idle,
+    }
+
+
 @app.get("/flow/state/{thread_id}")
 async def state(thread_id: str) -> dict[str, Any]:
     return await _snapshot(thread_id)
