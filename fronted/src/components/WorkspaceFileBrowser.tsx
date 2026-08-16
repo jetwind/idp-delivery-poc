@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import hljs from 'highlight.js/lib/common'
@@ -190,6 +190,8 @@ export default function WorkspaceFileBrowser({ threadId }: { threadId: string })
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  // 已见过的目录路径：只在「首次出现」时自动展开，避免每次轮询把用户折叠的目录又撑开。
+  const knownDirsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     let alive = true
@@ -198,14 +200,25 @@ export default function WorkspaceFileBrowser({ threadId }: { threadId: string })
         const r = await getFlowFiles(threadId)
         if (!alive) return
         setFiles(r.files)
-        setExpanded(prev => {
-          const next = new Set(prev)
-          for (const f of r.files) {
-            const parts = f.path.split('/')
-            for (let i = 1; i < parts.length; i++) next.add(parts.slice(0, i).join('/'))
+        const dirs = new Set<string>()
+        for (const f of r.files) {
+          const parts = f.path.split('/')
+          for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/'))
+        }
+        const fresh: string[] = []
+        for (const d of dirs) {
+          if (!knownDirsRef.current.has(d)) {
+            knownDirsRef.current.add(d)
+            fresh.push(d)
           }
-          return next
-        })
+        }
+        if (fresh.length > 0) {
+          setExpanded(prev => {
+            const next = new Set(prev)
+            for (const d of fresh) next.add(d)
+            return next
+          })
+        }
       } catch { /* 忽略单次失败 */ }
     }
     load()
