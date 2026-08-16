@@ -56,6 +56,8 @@ export interface FlowSnapshot {
   error: string | null
   /** 后台图执行任务是否还在跑（false = 可能因编排层重启而孤儿化）。 */
   flow_running: boolean
+  /** 当前阶段 agent 回合报错（如缺依赖/模型失败），有则显示。 */
+  stage_error?: string | null
   /** 阶段产物 schema 校验状态（结构化产物子步骤）。 */
   validation: {
     status: 'pending' | 'passed' | 'retrying' | 'failed'

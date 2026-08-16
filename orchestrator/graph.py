@@ -50,6 +50,9 @@ class FlowState(TypedDict, total=False):
     # 版本增量交付：当前版本名 + 基线版本信息（v1.1 基于 v1.0 继续叠加）。
     version_name: str | None
     baseline: dict[str, Any] | None
+    # 阶段执行诊断：agent 回合报错（透出给前端）+ 本阶段会话开始时间（校验产物新鲜度）。
+    stage_error: str | None
+    stage_started_at: float
 
 
 STAGES: list[dict[str, Any]] = [
@@ -290,11 +293,36 @@ async def peek_pending(client: HarnessClient, session_id: str) -> dict[str, Any]
         return None
 
 
+async def _last_turn_error(client: HarnessClient, session_id: str) -> str | None:
+    """读最近一次 agent 回合的结束原因；报错返回错误信息，正常结束/读不到返回 None。
+
+    用于把「agent 回合报错（如缺原生依赖 koffi）→ running=False」和「正常完成」区分开，
+    避免把报错结束误判成「阶段已完成」。
+    """
+    try:
+        history = await client.session_history(session_id, max_messages=2)
+    except Exception:  # noqa: BLE001 - 读不到历史按无错误处理，走常规流程
+        return None
+    for entry in reversed(history.get("events", [])):
+        event = entry.get("event", {})
+        if event.get("type") != "turn/end":
+            continue
+        reason = (event.get("data") or {}).get("reason") or {}
+        if isinstance(reason, dict) and reason.get("kind") == "error":
+            err = reason.get("error")
+            if isinstance(err, dict):
+                return err.get("message") or err.get("code") or "agent 回合异常结束"
+            return str(err or "agent 回合异常结束")
+        return None
+    return None
+
+
 async def start_stage(state: FlowState, client: HarnessClient) -> FlowState:
     stage = STAGES[state["stage_index"]]
     if state.get("current_session_id") is None:
         created = await client.create_session(state["cwd"], stage["preset"])
         state["current_session_id"] = created["sessionId"]
+        state["stage_started_at"] = time.time()
         # 记录一句完整的「任务」标题，供运行监控展示（替代 harness 自动截断的 title）。
         activity_store.record_session_title(
             state["current_session_id"], clean_stage_title(stage), stage["id"],
@@ -356,6 +384,14 @@ async def poll_stage(state: FlowState, client: HarnessClient) -> FlowState:
     running = await client.session_running(session_id)
     if running:
         state["stage_done"] = False
+        return state
+
+    # 不在跑：先确认是不是「agent 回合报错结束」，是则透出错误、停止阶段，避免把报错误判成完成。
+    stage_error = await _last_turn_error(client, session_id)
+    if stage_error:
+        state["stage_error"] = stage_error
+        state["stage_done"] = True
+        state.setdefault("artifacts", {})[stage["id"]] = list(stage.get("output_files", []))
         return state
 
     state["stage_done"] = True
@@ -478,6 +514,12 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
     stage_id = stage["id"]
     schema = schema_store.get_schema(stage_id)
     out_json = schema_store.STAGE_OUTPUT_JSON.get(stage_id)
+    # agent 回合报错结束：直接判定失败并透出错误，不读旧文件「假通过」。
+    if state.get("stage_error"):
+        state["validation_status"] = "failed"
+        state["validation_error"] = state["stage_error"]
+        state["stage_done"] = True
+        return state
     if not schema or not out_json:
         state["validation_status"] = "passed"
         state["validation_error"] = None
@@ -489,15 +531,23 @@ async def validate_node(state: FlowState, client: HarnessClient) -> FlowState:
     if not os.path.isfile(full):
         errors = [f"产物文件不存在：{out_json}"]
     else:
+        # 铁律 2 强化：产物必须是本阶段新写出的，否则视为「agent 未产出」（拿上一版本旧文件冒充）。
         try:
-            with open(full, encoding="utf-8") as f:
-                instance = json.load(f)
-        except json.JSONDecodeError as exc:
-            errors = [f"产物不是合法 JSON：{exc}"]
-        except Exception as exc:  # noqa: BLE001 - 读产物失败按校验失败处理
-            errors = [f"读产物失败：{exc}"]
+            mtime = os.path.getmtime(full)
+        except OSError:
+            mtime = 0
+        if mtime < state.get("stage_started_at", 0):
+            errors = [f"产物文件 {out_json} 是本阶段开始前就存在的旧文件（agent 未产出新产物，可能回合报错或未写文件）"]
         else:
-            errors = schema_store.validate_instance(schema, instance)
+            try:
+                with open(full, encoding="utf-8") as f:
+                    instance = json.load(f)
+            except json.JSONDecodeError as exc:
+                errors = [f"产物不是合法 JSON：{exc}"]
+            except Exception as exc:  # noqa: BLE001 - 读产物失败按校验失败处理
+                errors = [f"读产物失败：{exc}"]
+            else:
+                errors = schema_store.validate_instance(schema, instance)
 
     # schema 通过后，04/05 追加确定性命令验收（跑 build/test 命令取退出码）。
     if not errors and isinstance(instance, dict):

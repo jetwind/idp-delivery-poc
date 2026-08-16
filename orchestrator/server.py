@@ -305,6 +305,7 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
         "cwd": values.get("cwd"),
         "error": _flow_errors.get(thread_id),
         "flow_running": thread_id in _flow_tasks and not _flow_tasks[thread_id].done(),
+        "stage_error": values.get("stage_error"),
         "validation": {
             "status": values.get("validation_status", "pending"),
             "attempts": values.get("validation_attempts", 0),

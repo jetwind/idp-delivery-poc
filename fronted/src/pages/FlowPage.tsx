@@ -63,6 +63,7 @@ export default function FlowPage() {
         const snap = await getFlowState(threadId)
         setSnapshot(snap)
         if (snap.error) setError(snap.error)
+        else if (snap.stage_error) setError(snap.stage_error)
         if (snap.done && snap.pending === null) stopPolling()
       } catch { /* 单次轮询失败不断流 */ }
     }
