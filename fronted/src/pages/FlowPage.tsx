@@ -174,7 +174,7 @@ export default function FlowPage() {
         answer = {
           action: 'revise',
           feedback: gateFeedback.trim(),
-          findings: findings.map(f => ({ path: f.path, line: f.line, severity: f.severity, comment: f.comment })),
+          findings: findings.map(f => ({ path: f.path, line: f.line, ref: f.ref, severity: f.severity, comment: f.comment })),
         }
       }
       await resumeFlow(threadId!, answer)
@@ -494,7 +494,7 @@ export default function FlowPage() {
                             ? <ShieldCheck className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
                             : <MessageSquare className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />}
                           <div className="min-w-0 flex-1">
-                            <span className="font-mono text-slate-500">{f.path}{f.line ? ` : ${f.line}` : ''}</span>
+                            <span className="font-mono text-slate-500">{f.path}{f.ref ? ` · ${f.ref}` : f.line ? ` : ${f.line}` : ''}</span>
                             <span className={cn('ml-1.5 px-1 rounded text-[10px]', f.severity === 'blocking' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700')}>
                               {f.severity === 'blocking' ? '阻断' : '建议'}
                             </span>

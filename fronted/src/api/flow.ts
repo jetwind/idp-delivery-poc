@@ -528,6 +528,8 @@ export interface AuditFinding {
   stage: string
   path: string
   line: number | null
+  /** JSON 产物的结构化定位（如 functionalRequirements[0].acceptanceCriteria[1]）。 */
+  ref: string | null
   severity: 'blocking' | 'suggestion'
   comment: string
   status: 'open' | 'resolved'
@@ -554,9 +556,9 @@ export function getAuditFindings(versionId: string, stage?: string): Promise<{ f
   return flowJson(`/versions/${encodeURIComponent(versionId)}/audit${stage ? `?stage=${encodeURIComponent(stage)}` : ''}`)
 }
 
-/** 新建一条审计意见。 */
+/** 新建一条审计意见。line 用于代码文件行号；ref 用于 JSON 产物结构化定位。 */
 export function createAuditFinding(
-  versionId: string, body: { stage: string; path: string; line: number | null; severity: 'blocking' | 'suggestion'; comment: string },
+  versionId: string, body: { stage: string; path: string; line: number | null; ref: string | null; severity: 'blocking' | 'suggestion'; comment: string },
 ): Promise<{ finding: AuditFinding }> {
   return flowJson(`/versions/${encodeURIComponent(versionId)}/audit`, {
     method: 'POST',

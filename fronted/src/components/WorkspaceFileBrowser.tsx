@@ -8,9 +8,10 @@ import {
   Eye, Code2, GitCompareArrows, Plus, Trash2, CheckCheck, MessageSquare, AlertTriangle, X,
 } from 'lucide-react'
 import {
-  getFlowFiles, getFlowFile, getAuditFindings, createAuditFinding, deleteAuditFinding, updateAuditFinding, getFileDiff,
+  getFlowFiles, getFlowFile, getAuditFindings, createAuditFinding, deleteAuditFinding, updateAuditFinding, getFileDiff, getStagesSchema,
   type FlowFile, type AuditFinding, type FileDiff,
 } from '@/api/flow'
+import JsonArtifactView from '@/components/JsonArtifactView'
 import { cn } from '@/lib/utils'
 
 interface TreeNode {
@@ -65,6 +66,15 @@ const HLJS_LANG: Record<string, string> = {
 }
 
 type PreviewKind = 'markdown' | 'json' | 'code' | 'text'
+
+/** 阶段产物 JSON 文件路径 → 阶段 id（用预览模板渲染，避免与 md 文档对不齐）。 */
+const JSON_ARTIFACT_STAGE: Record<string, string> = {
+  'specs/requirements.json': 'requirements',
+  'docs/design.json': 'design',
+  'specs/tasks.json': 'tasks',
+  'specs/implementation.json': 'coding',
+  'docs/test-report.json': 'testing',
+}
 
 function detectKind(path: string): PreviewKind {
   const ext = path.split('.').pop()?.toLowerCase() ?? ''
@@ -250,12 +260,24 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
   const [diffMode, setDiffMode] = useState(false)
   const [diffLoading, setDiffLoading] = useState(false)
 
+  // 阶段产物 JSON schema（预览模板用）+ 当前选中文件的解析结果
+  const [schemas, setSchemas] = useState<Record<string, Record<string, unknown>>>({})
+  const [parsedJson, setParsedJson] = useState<Record<string, unknown> | null>(null)
+
   // 审计意见（当前阶段）
   const [findings, setFindings] = useState<AuditFinding[]>([])
-  const [annotateLine, setAnnotateLine] = useState<number | null>(null)
+  const [annotate, setAnnotate] = useState<{ ref?: string; line?: number; label: string } | null>(null)
   const [newComment, setNewComment] = useState('')
   const [newSeverity, setNewSeverity] = useState<'blocking' | 'suggestion'>('suggestion')
   const [findingsBusy, setFindingsBusy] = useState(false)
+
+  useEffect(() => {
+    getStagesSchema().then(r => {
+      const map: Record<string, Record<string, unknown>> = {}
+      for (const s of r.schemas) map[s.stage] = s.schema as Record<string, unknown>
+      setSchemas(map)
+    }).catch(() => { /* 忽略 */ })
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -305,12 +327,17 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
 
   async function open(path: string) {
     setSelected(path); setLoading(true); setErr(null)
-    setDiff(null); setDiffMode(false); setSourceMode(false); setAnnotateLine(null)
+    setDiff(null); setDiffMode(false); setSourceMode(false); setAnnotate(null)
     try {
       const r = await getFlowFile(threadId, path)
       setContent(r.content); setTruncated(r.truncated)
+      if (JSON_ARTIFACT_STAGE[path]) {
+        try { setParsedJson(JSON.parse(r.content)) } catch { setParsedJson(null) }
+      } else {
+        setParsedJson(null)
+      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e)); setContent('')
+      setErr(e instanceof Error ? e.message : String(e)); setContent(''); setParsedJson(null)
     } finally {
       setLoading(false)
     }
@@ -339,12 +366,15 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
   }
 
   async function submitFinding() {
-    if (!selected || annotateLine == null || !newComment.trim() || !versionId || !stage) return
+    if (!selected || !annotate || !newComment.trim() || !versionId || !stage) return
     setFindingsBusy(true)
     try {
-      await createAuditFinding(versionId, { stage, path: selected, line: annotateLine, severity: newSeverity, comment: newComment.trim() })
+      await createAuditFinding(versionId, {
+        stage, path: selected, line: annotate.line ?? null, ref: annotate.ref ?? null,
+        severity: newSeverity, comment: newComment.trim(),
+      })
       await reloadFindings()
-      setAnnotateLine(null); setNewComment(''); setNewSeverity('suggestion')
+      setAnnotate(null); setNewComment(''); setNewSeverity('suggestion')
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -379,6 +409,8 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
   const tree = useMemo(() => buildTree(files), [files])
   const selectedFile = files.find(f => f.path === selected)
   const openFindings = findings.filter(f => f.status === 'open')
+  const jsonStage = selected ? JSON_ARTIFACT_STAGE[selected] : undefined
+  const jsonSchema = jsonStage ? schemas[jsonStage] : undefined
 
   return (
     <div className="bg-white rounded-lg border border-slate-200/80 mb-4">
@@ -431,12 +463,12 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
                 </div>
               </div>
               {/* 标注表单 */}
-              {annotateLine != null && stage && (
+              {annotate && stage && (
                 <div className="mx-4 mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
                   <div className="flex items-center gap-2 mb-2">
                     <MessageSquare className="w-4 h-4 text-amber-500" />
-                    <span className="text-xs font-medium text-slate-700">在第 {annotateLine} 行添加审计意见（{selected}）</span>
-                    <button onClick={() => setAnnotateLine(null)} className="ml-auto text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
+                    <span className="text-xs font-medium text-slate-700">审计标注：{annotate.label}（{selected}）</span>
+                    <button onClick={() => setAnnotate(null)} className="ml-auto text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
                   </div>
                   <div className="flex gap-1.5 mb-2">
                     <button onClick={() => setNewSeverity('blocking')}
@@ -454,7 +486,7 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
                     placeholder="这条意见要 agent 怎么改？"
                     className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400" />
                   <div className="mt-2 flex justify-end gap-2">
-                    <button onClick={() => setAnnotateLine(null)} className="h-7 px-3 rounded text-xs text-slate-500 border border-slate-200">取消</button>
+                    <button onClick={() => setAnnotate(null)} className="h-7 px-3 rounded text-xs text-slate-500 border border-slate-200">取消</button>
                     <button onClick={submitFinding} disabled={findingsBusy || !newComment.trim()}
                       className="inline-flex items-center gap-1 h-7 px-3 rounded text-xs font-medium bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50">
                       {findingsBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}添加意见
@@ -465,8 +497,11 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
               <div className="p-4">
                 {diffMode && diff ? (
                   <DiffView diff={diff} />
+                ) : jsonStage && jsonSchema && parsedJson && !sourceMode ? (
+                  <JsonArtifactView json={parsedJson} schema={jsonSchema} findings={findings}
+                    onAnnotate={(ref, label) => stage && setAnnotate({ ref, label })} />
                 ) : sourceMode || detectKind(selected) === 'text' ? (
-                  <SourceView content={content} findings={findings} onAnnotate={line => stage && setAnnotateLine(line)} />
+                  <SourceView content={content} findings={findings} onAnnotate={line => stage && setAnnotate({ line, label: `第 ${line} 行` })} />
                 ) : (
                   <FilePreview path={selected} content={content} />
                 )}
@@ -494,7 +529,7 @@ export default function WorkspaceFileBrowser({ threadId, versionId, stage }: {
                   ? <AlertTriangle className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
                   : <MessageSquare className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />}
                 <div className="flex-1 min-w-0">
-                  <div className="font-mono text-slate-600">{f.path}{f.line ? ` : ${f.line}` : ''}
+                  <div className="font-mono text-slate-600">{f.path}{f.ref ? ` · ${f.ref}` : f.line ? ` : ${f.line}` : ''}
                     <span className={cn('ml-2 px-1 rounded', f.severity === 'blocking' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700')}>
                       {f.severity === 'blocking' ? '阻断' : '建议'}
                     </span>

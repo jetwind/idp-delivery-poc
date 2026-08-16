@@ -573,12 +573,14 @@ class AuditFindingRequest(BaseModel):
     stage: str
     path: str
     line: int | None = None
+    ref: str | None = None
     severity: str = "suggestion"
     comment: str
 
 
 class AuditFindingUpdate(BaseModel):
     line: int | None = None
+    ref: str | None = None
     severity: str | None = None
     comment: str | None = None
     status: str | None = None
@@ -599,7 +601,7 @@ async def audit_create(vid: str, req: AuditFindingRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"非法严重度：{req.severity}")
     if not req.comment.strip():
         raise HTTPException(status_code=400, detail="审计意见不能为空")
-    finding = audit_store.create_finding(vid, req.stage, req.path, req.line, req.severity, req.comment.strip())
+    finding = audit_store.create_finding(vid, req.stage, req.path, req.line, req.ref, req.severity, req.comment.strip())
     return {"finding": finding}
 
 
@@ -611,6 +613,8 @@ async def audit_update(vid: str, fid: str, req: AuditFindingUpdate) -> dict[str,
     fields: dict[str, Any] = {}
     if req.line is not None:
         fields["line"] = req.line
+    if req.ref is not None:
+        fields["ref"] = req.ref
     if req.severity is not None:
         if req.severity not in audit_store.SEVERITY:
             raise HTTPException(status_code=400, detail=f"非法严重度：{req.severity}")

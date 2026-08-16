@@ -586,11 +586,17 @@ def _format_findings(findings: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for f in findings:
         path = f.get("path") or "?"
+        ref = f.get("ref")
         line = f.get("line")
         severity = f.get("severity") or "suggestion"
         sev = "阻断" if severity == "blocking" else "建议"
         comment = str(f.get("comment") or "").strip()
-        loc = path + (f" 第{line}行" if line else "")
+        if ref:
+            loc = f"{path} 的 {ref}"
+        elif line:
+            loc = f"{path} 第{line}行"
+        else:
+            loc = path
         lines.append(f"- [{sev}] {loc}：{comment}")
     return "\n".join(lines)
 

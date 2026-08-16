@@ -37,6 +37,7 @@ def init_db() -> None:
             "stage TEXT NOT NULL, "
             "path TEXT NOT NULL, "
             "line INTEGER, "
+            "ref TEXT, "
             "severity TEXT NOT NULL, "
             "comment TEXT NOT NULL, "
             "status TEXT NOT NULL DEFAULT 'open', "
@@ -47,6 +48,10 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_audit_version_stage ON audit_findings(version_id, stage)",
         )
+        # 兼容旧库：补 ref 列（JSON 产物的结构化定位，如 functionalRequirements[0]）。
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(audit_findings)").fetchall()]
+        if "ref" not in cols:
+            conn.execute("ALTER TABLE audit_findings ADD COLUMN ref TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -70,16 +75,16 @@ def list_findings(version_id: str, stage: str | None = None) -> list[dict]:
         conn.close()
 
 
-def create_finding(version_id: str, stage: str, path: str, line: int | None,
+def create_finding(version_id: str, stage: str, path: str, line: int | None, ref: str | None,
                    severity: str, comment: str) -> dict:
     fid = "a" + uuid.uuid4().hex[:12]
     now = _now()
     conn = _conn()
     try:
         conn.execute(
-            "INSERT INTO audit_findings(id, version_id, stage, path, line, severity, comment, status, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (fid, version_id, stage, path, line, severity, comment, "open", now, now),
+            "INSERT INTO audit_findings(id, version_id, stage, path, line, ref, severity, comment, status, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (fid, version_id, stage, path, line, ref, severity, comment, "open", now, now),
         )
         conn.commit()
     finally:
@@ -97,7 +102,7 @@ def get_finding(fid: str) -> dict | None:
 
 
 def update_finding(fid: str, **fields: object) -> dict | None:
-    allowed = {"line", "severity", "comment", "status"}
+    allowed = {"line", "ref", "severity", "comment", "status"}
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not updates:
         return get_finding(fid)
