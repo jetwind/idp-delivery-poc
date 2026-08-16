@@ -40,6 +40,14 @@
   config:
     allowParallelInProgress: true
 
+# Skills: `skill-filesystem` 从本地（~/.dsh/skills）发现 skill，`tool-skill` 给
+# agent 提供目录与加载器。skill 注册表在 host 平面，这里挂到本 preset 层。
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
 # Delegation and workflows: the worker-thread engine, the general workflow
 # tool, the fresh-agent Ralph loop, and the one-shot subagent tool share one
 # entry-local `workflowEngine` realm; `subagents` itself stays host-plane.
