@@ -323,7 +323,7 @@ async def _snapshot(thread_id: str) -> dict[str, Any]:
 async def _start_flow(
     requirement_text: str, cwd_raw: str,
     version_name: str | None = None, baseline: dict[str, Any] | None = None,
-    version_id: str | None = None,
+    version_id: str | None = None, workspace_title: str | None = None,
 ) -> dict[str, Any]:
     thread_id = str(uuid.uuid4())
     cwd = _resolve_cwd(cwd_raw)
@@ -335,6 +335,7 @@ async def _start_flow(
         "version_name": version_name,
         "version_id": version_id,
         "baseline": baseline,
+        "workspace_title": workspace_title,
     }
     _flow_errors.pop(thread_id, None)
     _flow_tasks[thread_id] = asyncio.create_task(_run_flow(thread_id, initial, _config(thread_id)))
@@ -386,6 +387,7 @@ async def _start_version_flow(ver: dict) -> dict[str, Any]:
     snap = await _start_flow(
         ver["requirement_text"], (proj or {}).get("cwd", ""),
         version_name=ver["name"], baseline=baseline, version_id=ver["id"],
+        workspace_title=(proj or {}).get("name"),
     )
     project_store.set_version_thread(ver["id"], snap["thread_id"])
     return snap
