@@ -8,7 +8,6 @@ import FlowPage from '@/pages/FlowPage'
 import StandardsManagePage from '@/pages/StandardsManagePage'
 import AgentsCenter from '@/pages/AgentsCenter'
 import KnowledgeCenter from '@/pages/KnowledgeCenter'
-import MetricsCenter from '@/pages/MetricsCenter'
 import AICockpit from '@/pages/AICockpit'
 import './App.css'
 
@@ -26,7 +25,6 @@ export default function App() {
         <Route path="/agents" element={<AgentsCenter />} />
         <Route path="/knowledge" element={<KnowledgeCenter />} />
         <Route path="/knowledge/standards" element={<StandardsManagePage />} />
-        <Route path="/metrics" element={<MetricsCenter />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>
     </AppLayout>

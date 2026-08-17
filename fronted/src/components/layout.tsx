@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  LayoutGrid, Workflow, Gauge, Radar, Bot, BookOpen,
+  LayoutGrid, Workflow, Radar, Bot, BookOpen,
   Search, ChevronDown, Hexagon, CircleUser, Check,
 } from 'lucide-react'
 
@@ -24,12 +24,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       items: [
         { to: '/projects', label: '项目列表', icon: LayoutGrid, end: true },
         { to: `${P}`, label: '项目详情', icon: Workflow },
-      ],
-    },
-    {
-      title: '管理视角',
-      items: [
-        { to: '/metrics', label: '度量中心', icon: Gauge },
       ],
     },
     {
@@ -161,7 +155,7 @@ function crumbMap(path: string): string {
   if (/^\/projects$/.test(path)) return '项目列表'
   if (/^\/knowledge\/standards/.test(path)) return '知识库 · 工程标准'
   const map: [RegExp, string][] = [
-    [/^\/cockpit/, 'AI 驾驶舱'], [/^\/agents/, '数字员工中心'], [/^\/knowledge/, '知识库管理'], [/^\/metrics/, '度量中心'],
+    [/^\/cockpit/, 'AI 驾驶舱'], [/^\/agents/, '数字员工中心'], [/^\/knowledge/, '知识库管理'],
   ]
   for (const [re, label] of map) if (re.test(path)) return label
   return 'AI 交付'

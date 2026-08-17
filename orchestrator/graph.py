@@ -51,6 +51,8 @@ class FlowState(TypedDict, total=False):
     version_name: str | None
     version_id: str | None
     baseline: dict[str, Any] | None
+    # harness 工作区标题（= 项目名），用于 3086 界面按项目分组会话。
+    workspace_title: str | None
     # 阶段执行诊断：agent 回合报错（透出给前端）+ 本阶段会话开始时间（校验产物新鲜度）。
     stage_error: str | None
     stage_started_at: float
@@ -321,7 +323,7 @@ async def _last_turn_error(client: HarnessClient, session_id: str) -> str | None
 async def start_stage(state: FlowState, client: HarnessClient) -> FlowState:
     stage = STAGES[state["stage_index"]]
     if state.get("current_session_id") is None:
-        created = await client.create_session(state["cwd"], stage["preset"])
+        created = await client.create_session(state["cwd"], stage["preset"], state.get("workspace_title"))
         state["current_session_id"] = created["sessionId"]
         state["stage_started_at"] = time.time()
         # 记录一句完整的「任务」标题，供运行监控展示（替代 harness 自动截断的 title）。

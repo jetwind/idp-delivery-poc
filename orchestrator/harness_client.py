@@ -49,8 +49,26 @@ class HarnessClient:
 
     # ---- session（legacy）----
 
-    async def create_session(self, cwd: str, agent_preset: str) -> dict[str, Any]:
+    async def create_session(self, cwd: str, agent_preset: str, workspace_title: str | None = None) -> dict[str, Any]:
+        """开新会话。workspace_title 非空时，先把 cwd 对应的 harness 工作区命名成项目名，
+        再以 workspaceId 建会话，使 3086 界面里的会话按项目分组（而非「未分组」）。"""
+        if workspace_title:
+            wid = await self._ensure_workspace(cwd, workspace_title)
+            if wid:
+                return await self._legacy("session.create", {"workspaceId": wid, "agentPreset": agent_preset})
         return await self._legacy("session.create", {"cwd": cwd, "agentPreset": agent_preset})
+
+    async def _ensure_workspace(self, cwd: str, title: str) -> str:
+        """创建/复用 cwd 对应的工作区，并把显示标题设为项目名；返回 workspaceId。"""
+        created = await self._legacy("workspace.create", {"path": cwd})
+        workspace = created.get("workspace", {}) or {}
+        wid = workspace.get("workspaceId")
+        if wid and workspace.get("title") != title:
+            try:
+                await self._legacy("workspace.rename", {"workspaceId": wid, "title": title})
+            except HarnessError:  # noqa: BLE001 - 标题重名等失败不阻断建会话
+                pass
+        return wid or ""
 
     async def select_model(
         self, session_id: str, provider: str, model: str, reasoning_effort: str | None = None,
