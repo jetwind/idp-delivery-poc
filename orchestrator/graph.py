@@ -337,10 +337,13 @@ async def start_stage(state: FlowState, client: HarnessClient) -> FlowState:
                 await client.select_model(
                     created["sessionId"], cfg["provider"], cfg["model"], cfg["reasoning_effort"],
                 )
+            except Exception:  # noqa: BLE001 - 模型选择失败用默认，不阻断
+                pass
+            try:
                 perm = cfg.get("permission")
                 if perm:
                     await client.execute_command(created["sessionId"], f"/permission {perm}")
-            except Exception:  # noqa: BLE001 - 配置应用失败用默认值
+            except Exception:  # noqa: BLE001 - 权限应用失败用默认，不阻断
                 pass
         prompt = stage["task"]
         input_text = collect_input_files(state, stage)
