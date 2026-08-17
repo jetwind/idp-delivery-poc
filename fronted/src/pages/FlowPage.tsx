@@ -33,6 +33,7 @@ export default function FlowPage() {
   const [gateAttachments, setGateAttachments] = useState<Attachment[]>([])
   const [logs, setLogs] = useState<FlowEvent[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
+  const [todosByStage, setTodosByStage] = useState<Record<string, TodoItem[]>>({})
   const [running, setRunning] = useState(false)
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const [auditTrail, setAuditTrail] = useState<AuditFinding[]>([])
@@ -95,6 +96,7 @@ export default function FlowPage() {
         const ev = await getFlowEvents(threadId)
         setRunning(ev.running)
         setTodos(ev.todos ?? [])
+        if (ev.stage) setTodosByStage(prev => ({ ...prev, [ev.stage]: ev.todos ?? [] }))
         const fresh = ev.events.filter(e => {
           const key = `${e.session_id ?? '?'}:${e.seq}`
           if (seenRef.current.has(key)) return false
@@ -213,6 +215,8 @@ export default function FlowPage() {
   const selectedStageName = selectedStage ? STAGES.find(s => s.id === selectedStage)?.name : undefined
   const shownLogs = selectedStageName ? logs.filter(e => e.stage === selectedStageName) : logs
   const selectedOutputs = selectedStage && snapshot?.artifacts ? (snapshot.artifacts[selectedStage] ?? []) : []
+  const retrospective = !!selectedStage
+  const shownTodos = retrospective && selectedStageName ? (todosByStage[selectedStageName] ?? []) : todos
   const gateStageId = snapshot ? STAGES[snapshot.stage_index]?.id : undefined
   const gateOutputs = gateStageId && snapshot?.artifacts ? (snapshot.artifacts[gateStageId] ?? []) : []
   const gateFindings = gateStageId ? auditTrail.filter(f => f.stage === gateStageId && f.status === 'open') : []
@@ -288,7 +292,7 @@ export default function FlowPage() {
       {/* 运行状态 */}
       {threadId && snapshot && (
         <div className="space-y-4">
-          {!snapshot.done && !pending && (
+          {!retrospective && !snapshot.done && !pending && (
             <div className="bg-white rounded-lg border border-indigo-100 bg-indigo-50/40 px-5 py-4 flex items-center gap-3">
               {snapshot.flow_running
                 ? <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
@@ -306,16 +310,17 @@ export default function FlowPage() {
             </div>
           )}
 
-          {/* 执行子步骤（agent 的 todo_write 计划 + 进度） */}
-          {!snapshot.done && todos.length > 0 && (
+          {/* 执行子步骤（agent 的 todo_write 计划 + 进度；回溯时显示所选阶段） */}
+          {shownTodos.length > 0 && (
             <div className="bg-white rounded-lg border border-slate-200/80 px-5 py-4">
               <div className="flex items-center gap-2 mb-3">
                 <ListChecks className="w-4 h-4 text-indigo-500" />
                 <span className="text-[13px] font-semibold text-slate-800">执行子步骤</span>
-                <span className="text-xs text-slate-400">{todos.filter(t => t.status === 'completed').length}/{todos.length} 完成</span>
+                {retrospective && selectedStageName && <Pill tone="violet">{selectedStageName}</Pill>}
+                <span className="text-xs text-slate-400">{shownTodos.filter(t => t.status === 'completed').length}/{shownTodos.length} 完成</span>
               </div>
               <div className="space-y-1.5">
-                {todos.map((t, i) => (
+                {shownTodos.map((t, i) => (
                   <div key={i} className="flex items-start gap-2 text-xs">
                     {t.status === 'completed'
                       ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
@@ -332,8 +337,8 @@ export default function FlowPage() {
             </div>
           )}
 
-          {/* 结构化产物 schema 校验子步骤 */}
-          {snapshot.validation.status !== 'pending' && (
+          {/* 结构化产物 schema 校验子步骤（仅当前阶段；回溯时隐藏） */}
+          {!retrospective && snapshot.validation.status !== 'pending' && (
             <div className={cn('rounded-lg border px-4 py-3 flex items-start gap-2.5',
               snapshot.validation.status === 'passed' ? 'border-emerald-200/70 bg-emerald-50/50'
                 : snapshot.validation.status === 'failed' ? 'border-rose-200/70 bg-rose-50/50'
@@ -357,7 +362,7 @@ export default function FlowPage() {
           )}
 
           {/* question */}
-          {pending?.type === 'question' && (
+          {!retrospective && pending?.type === 'question' && (
             <div className="bg-white rounded-lg border border-amber-200/70 px-5 py-4">
               <div className="flex items-center gap-2 mb-3">
                 <ShieldCheck className="w-4 h-4 text-amber-500" />
@@ -386,7 +391,7 @@ export default function FlowPage() {
 
           {/* gate */}
           {/* approval */}
-          {pending?.type === 'approval' && (
+          {!retrospective && pending?.type === 'approval' && (
             <div className="bg-white rounded-lg border border-rose-200/70 px-5 py-4">
               <div className="flex items-center gap-2 mb-3">
                 <ShieldCheck className="w-4 h-4 text-rose-500" />
@@ -407,7 +412,7 @@ export default function FlowPage() {
           )}
 
           {/* gate */}
-          {pending?.type === 'gate' && (
+          {!retrospective && pending?.type === 'gate' && (
             <div className="bg-white rounded-lg border border-violet-200/70 px-5 py-4">
               <div className="flex items-center gap-2 mb-3">
                 <ShieldCheck className="w-4 h-4 text-violet-500" />
@@ -470,7 +475,7 @@ export default function FlowPage() {
           )}
 
           {/* 完成 */}
-          {snapshot.done && (
+          {!retrospective && snapshot.done && (
             <div className="bg-white rounded-lg border border-emerald-200/70 px-5 py-6 text-center">
               <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
               <div className="mt-2 text-[15px] font-semibold text-slate-800">交付流水线完成</div>
