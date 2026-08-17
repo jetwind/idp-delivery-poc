@@ -44,6 +44,7 @@ export default function FlowPage() {
   const seenRef = useRef<Set<string>>(new Set())
   const eventsBusyRef = useRef(false)
   const logRef = useRef<HTMLDivElement | null>(null)
+  const stageIndexRef = useRef<number | null>(null)
 
   const stopPolling = useCallback(() => {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
@@ -84,6 +85,11 @@ export default function FlowPage() {
       try {
         const snap = await getFlowState(threadId)
         setSnapshot(snap)
+        // 阶段切换时先清空当前阶段子步骤，等新阶段的 todos 到了再渲染（避免串阶段残留）
+        if (stageIndexRef.current !== null && stageIndexRef.current !== snap.stage_index) {
+          setTodos([])
+        }
+        stageIndexRef.current = snap.stage_index
         if (snap.error) setError(snap.error)
         else if (snap.stage_error) setError(snap.stage_error)
         if (snap.done && snap.pending === null) stopPolling()

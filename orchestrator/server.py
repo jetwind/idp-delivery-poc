@@ -1208,8 +1208,16 @@ async def agents_models() -> dict[str, Any]:
     global _model_catalog
     if not _model_catalog:
         sessions = await client.list_sessions()
-        if sessions:
-            models = await client.session_models(sessions[0]["sessionId"])
+        # 跳过子代理会话（对它们调 session.models 会返回 agent-busy / subagent routing）
+        candidates = [
+            s for s in sessions
+            if s.get("origin") != "subagent" and not s.get("parentSessionId")
+        ]
+        for it in candidates:
+            try:
+                models = await client.session_models(it["sessionId"])
+            except Exception:  # noqa: BLE001 - 某会话 busy/无模型时换下一个
+                continue
             catalog = []
             for g in models.get("groups", []):
                 for m in g.get("models", []):
@@ -1222,6 +1230,7 @@ async def agents_models() -> dict[str, Any]:
                         "defaultEffort": reasoning.get("defaultEffort"),
                     })
             _model_catalog = catalog
+            break
     return {"models": _model_catalog}
 
 
